@@ -107,3 +107,14 @@ Output is correct.
 
 gem5 prints assorted `warn:` lines during the run (uartlite, MicroTAGE, issue
 queue) — those are normal.
+
+## 8. Write output files from a bare-metal gem5 program
+
+Bare-metal programs in this `--raw-cpt` setup have no Linux filesystem.
+To export results from any project, use gem5's `m5_write_file` pseudo-op.
+The host file appears under the simulator's `-d` output directory.
+
+[`setup.txt`](setup.txt) gives a reusable C/C++ helper, a small binary-file
+example, build and direct-run commands, verification, and troubleshooting.
+For a BMP-specific worked example, see
+[`example/source/T2_Sobel/steps.txt`](example/source/T2_Sobel/steps.txt).

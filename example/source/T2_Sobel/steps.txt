@@ -1,0 +1,174 @@
+T2_SOBEL: WRITING A BMP FROM BARE-METAL GEM5
+=============================================
+
+Problem
+-------
+The QEMU target is a Linux program, so fopen/fwrite can create a BMP on the
+host. The current XiangShan gem5 target instead loads a bare-metal .bin with
+--raw-cpt. It has no Linux file syscalls or guest filesystem, so copying the
+QEMU fopen/fwrite code into the gem5 build will not save an image. Printing
+pixels to the UART also does not create a BMP.
+
+Solution
+--------
+The gem5 build uses gem5's RISC-V m5_write_file pseudo-instruction. That
+instruction asks gem5 to copy bytes from guest memory into a HOST file in
+gem5's -d output directory. It does not need a guest filesystem, and it does
+not require changes to the current XiangShan gem5 source/configuration.
+
+The BMP is written in three pieces:
+  offset 0:    54-byte BMP header (creates/truncates the file)
+  offset 54:   1024-byte grayscale palette (256 entries x 4 bytes)
+  offset 1078: 262144 Sobel pixels (512 x 512, one byte per pixel)
+Expected total: 263222 bytes. The output filename is T2_Sobel_output.bmp.
+
+Files the team must have in the same project version
+----------------------------------------------------
+  example/CMakeLists.txt
+    Registers add_subdirectory(source/T2_Sobel T2_Sobel). Without this,
+    CMake will not expose the T2_Sobel targets.
+
+  example/source/T2_Sobel/CMakeLists.txt
+    Creates T2_Sobel_gem5 from T2_Sobel.cpp, links the bare-metal runtime,
+    and registers run_T2_Sobel_gem5. It also creates the QEMU target.
+
+  example/source/T2_Sobel/T2_Sobel.cpp
+    Under RISCV_BAREMETAL, includes gem5_output.h, writes the BMP header and
+    palette, calls sobel_image_mag2_thresh(imageDataSW, outImg, 16384) once,
+    then writes the output pixels. The non-bare-metal path uses fopen/fwrite.
+
+  example/source/T2_Sobel/gem5_output.h
+    Implements the RISC-V m5_write_file call (function 0x4f, instruction
+    0x9e00007b), checks the returned byte counts, and uses a RISC-V fence
+    before gem5 copies the computed pixels. The filename and palette are
+    compile-time data so gem5 can read them reliably from guest memory.
+
+  example/source/T2_Sobel/{Sobel.h,image.h,header.h}
+    Supply the Sobel algorithm, embedded source pixels, and 512x512 BMP
+    header. Keep image dimensions, IMG_SIZE, BMP header, and output byte count
+    consistent if you later change the image size.
+
+The existing top-level CMakeLists.txt, cmake/riscv64_xs_toolchain.cmake,
+cmake/riscv_add_baremetal.cmake, and nexus-am provide the toolchain and
+bare-metal runtime. They do not need a new edit for Sobel output. timer.h
+(RUNS = 10) is for the QEMU timing average only; gem5 runs Sobel once.
+Make sure these source changes are included when sharing the project. A
+checkout without gem5_output.h or the CMake registration cannot run this.
+
+Terminal steps (run from a shell on the host, NOT inside gem5)
+------------------------------------------------------------
+0. If gem5, nexus-am, the RISC-V cross compiler, or QEMU are not installed,
+   follow the repository's SETUP.md first. This runbook starts once those
+   prerequisites and this project are present. Replace the three paths below
+   with absolute paths on YOUR machine:
+
+   export SOBEL_ROOT=/absolute/path/to/RISCV_Academy
+   export SOBEL_AM=/absolute/path/to/nexus-am
+   export SOBEL_GEM5=/absolute/path/to/GEM5
+   cd "$SOBEL_ROOT"
+
+   SOBEL_ROOT is this project. SOBEL_AM is the nexus-am checkout. SOBEL_GEM5
+   is the XiangShan GEM5 checkout. All later paths use these values.
+
+1. Check the required programs and files:
+
+   cmake --version
+   command -v riscv64-linux-gnu-g++
+   command -v riscv64-linux-gnu-objcopy
+   command -v qemu-riscv64
+   ls -ld "$SOBEL_AM/am" "$SOBEL_AM/libs/klib"
+   ls -l "$SOBEL_GEM5/build/RISCV/gem5.opt" "$SOBEL_GEM5/configs/example/kmhv3.py"
+   ls -l example/source/T2_Sobel/{T2_Sobel.cpp,Sobel.h,image.h,header.h,gem5_output.h,CMakeLists.txt}
+
+   Each command should find its target. QEMU is checked because the current
+   top-level CMake configuration requires it even for a gem5-only build.
+   If a prerequisite is missing, install/build it as described in SETUP.md.
+
+2. Configure this project's RISC-V build:
+
+   cmake -S . -B build \
+     -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64_xs_toolchain.cmake \
+     -DNEXUS_AM_HOME="$SOBEL_AM" \
+     -DGEM5_HOME="$SOBEL_GEM5" \
+     -DQEMU_BINARY="$(command -v qemu-riscv64)"
+
+   This chooses the cross compiler and tells CMake where nexus-am, gem5,
+   and QEMU are. If your gem5 binary or config script is elsewhere, also pass
+   -DGEM5_BINARY=/absolute/path/to/gem5.opt and/or
+   -DGEM5_CONFIG=/absolute/path/to/kmhv3.py. CMake prints the resolved paths.
+
+3. Build just the gem5 Sobel program:
+
+   cmake --build build --target T2_Sobel_gem5
+   ls -lh build/example/T2_Sobel/T2_Sobel.elf build/example/T2_Sobel/T2_Sobel.bin
+
+   CMake compiles the bare-metal ELF, links nexus-am's am/klib, and objcopies
+   it to T2_Sobel.bin. The raw .bin is what this gem5 --raw-cpt config loads.
+   Do not pass the QEMU executable or the .elf to --generic-rv-cpt.
+
+4A. Easiest run: use the CMake gem5 target:
+
+   cmake --build build --target run_T2_Sobel_gem5
+
+   This builds if needed and runs gem5 with the correct --raw-cpt options.
+   Look for "Wrote T2_Sobel_output.bmp in gem5 output directory." Its UART
+   log is build/example/T2_Sobel/T2_Sobel_gem5.log. The image is:
+
+   build/example/T2_Sobel/T2_Sobel_gem5-m5out/T2_Sobel_output.bmp
+
+4B. Alternatively, run gem5 DIRECTLY after step 3 (no CMake run target):
+
+   cd "$SOBEL_ROOT/build/example/T2_Sobel"
+   "$SOBEL_GEM5/build/RISCV/gem5.opt" --remote-gdb-port=0 \
+     -d "$SOBEL_ROOT/build/example/T2_Sobel/T2_Sobel_direct-m5out" \
+     "$SOBEL_GEM5/configs/example/kmhv3.py" \
+     --raw-cpt \
+     --generic-rv-cpt="$SOBEL_ROOT/build/example/T2_Sobel/T2_Sobel.bin" \
+     --disable-difftest
+
+   This is the same bare-metal setup with a separate output directory.
+   Running from the Sobel build directory also keeps gem5/DRAMsim3 side files
+   under build/example/T2_Sobel instead of the repository root.
+   --generic-rv-cpt selects the .bin; -d selects the HOST output directory.
+   The direct-run image is:
+
+   build/example/T2_Sobel/T2_Sobel_direct-m5out/T2_Sobel_output.bmp
+
+   If you configured different GEM5_CONFIG or GEM5_EXTRA_ARGS values in
+   CMake, use those same values for a direct run.
+
+5. Verify the output from step 4A (replace the path for step 4B):
+
+   file build/example/T2_Sobel/T2_Sobel_gem5-m5out/T2_Sobel_output.bmp
+   stat -c '%s bytes' build/example/T2_Sobel/T2_Sobel_gem5-m5out/T2_Sobel_output.bmp
+
+   file should identify a 512 x 512, 8-bit BMP, and stat should print
+   263222 bytes. The image is on the host under -d, not in the guest or the
+   project root. Each run rewrites the BMP at that output path.
+
+6. Optional functional comparison with QEMU:
+
+   cmake --build build --target run_T2_Sobel_qemu
+   cmp build/example/T2_Sobel/T2_Sobel_output.bmp \
+       build/example/T2_Sobel/T2_Sobel_gem5-m5out/T2_Sobel_output.bmp
+
+   QEMU writes its BMP directly under build/example/T2_Sobel. cmp prints
+   nothing and exits successfully if both images have identical bytes. Its
+   10-run timing average does not apply to the single Sobel call in gem5.
+
+Troubleshooting
+---------------
+* No run_T2_Sobel_gem5 target: check example/CMakeLists.txt and the Sobel
+  CMakeLists.txt above, then rerun the configure command in step 2.
+* Simulation prints success but no BMP in the current directory: check the
+  -d directory shown in step 4. gem5 writes there, not to the shell's cwd.
+* No success message or incomplete BMP: inspect T2_Sobel_gem5.log (CMake
+  run), verify gem5_output.h is included in the bare-metal branch, and check
+  the three expected write lengths/offsets. The pixel write needs its fence.
+* Illegal/unknown pseudo-instruction: this solution requires a gem5 build
+  that implements RISC-V m5_write_file (M5OP_WRITE_FILE = 0x4f). Check your
+  GEM5/include/gem5/asm/generic/m5ops.h and GEM5/src/sim/pseudo_inst.cc.
+  If your fork lacks it, this exact direct-output method is unavailable.
+* The CMake run target pipes simulator output to tee, so a shell exit status
+  alone is not proof of success. Check the success message and BMP size, or
+  run: ctest --test-dir build -R '^T2_Sobel_gem5$' --output-on-failure

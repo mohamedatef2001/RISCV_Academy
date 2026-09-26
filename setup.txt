@@ -1,0 +1,169 @@
+WRITING OUTPUT FILES FROM BARE-METAL XIANGSHAN GEM5
+=================================================
+
+Purpose
+-------
+Use this for ANY RISC-V bare-metal project run with the XiangShan gem5
+configuration used in this repository. The output can be an image, text, or
+arbitrary binary data. The Sobel code is only one example of this method.
+
+Why a file does not appear
+--------------------------
+The --raw-cpt setup loads a bare-metal program, with no Linux filesystem or
+file syscalls for fopen/fwrite. gem5 does support the m5_write_file pseudo-op:
+it copies bytes from guest memory into a host file under gem5's -d directory.
+This is a feature of the simulator; it does not write into the guest VM.
+
+1. Check that your gem5 build supports this operation
+------------------------------------------------------
+On the host, replace the path with your gem5 checkout:
+
+    export GEM5_ROOT=/absolute/path/to/GEM5
+    grep -n M5OP_WRITE_FILE "$GEM5_ROOT/include/gem5/asm/generic/m5ops.h"
+    grep -n 'writefile(ThreadContext' "$GEM5_ROOT/src/sim/pseudo_inst.cc"
+    grep -n '0x0000007b' "$GEM5_ROOT/util/m5/src/abi/riscv/m5op.S"
+
+The first command should find M5OP_WRITE_FILE = 0x4f. The last file shows
+how RISC-V m5 instructions are encoded. In this fork, m5_write_file is
+instruction 0x9e00007b. This specific inline assembly is for RISC-V and a
+gem5 build with that pseudo-op; another ISA or simulator may differ.
+
+2. Add a small helper to YOUR bare-metal program
+-------------------------------------------------
+From your own project directory, open a new header in your editor:
+
+    cd /absolute/path/to/your/project
+    vi gem5_file.h
+
+Put this code in gem5_file.h (GNU RISC-V C or C++ compiler):
+
+    #pragma once
+    #include <stdint.h>
+
+    static inline uint64_t gem5_write_file(const void *data, uint64_t count,
+                                           uint64_t offset, const char *name)
+    {
+        register uintptr_t a0 asm("a0") = (uintptr_t)data;
+        register uintptr_t a1 asm("a1") = (uintptr_t)count;
+        register uintptr_t a2 asm("a2") = (uintptr_t)offset;
+        register uintptr_t a3 asm("a3") = (uintptr_t)name;
+
+        /* Finish guest stores before gem5 reads the buffer. */
+        asm volatile("fence rw, rw" ::: "memory");
+        asm volatile(".4byte 0x9e00007b" : "+r"(a0)
+                     : "r"(a1), "r"(a2), "r"(a3) : "memory");
+        return (uint64_t)a0;
+    }
+
+The arguments go in RISC-V registers a0=data address, a1=byte count,
+a2=file offset, a3=zero-terminated filename; a0 returns bytes written.
+Keep the name and buffer alive until the call returns. A plain filename
+(for example "result.bin") puts the file under gem5's -d directory.
+
+3. Call the helper from your own program
+----------------------------------------
+Open your source file and include the header. Here is a complete, small
+example to adapt; the prefix is just example data, not a gem5 requirement:
+
+    vi main.cpp
+
+    #include "gem5_file.h"
+
+    static const char output_name[] = "result.bin";
+    static const unsigned char prefix[] = {'G', '5', '\n'};
+    static unsigned char result[4];
+
+    int main()
+    {
+        if (gem5_write_file(prefix, sizeof(prefix), 0, output_name)
+            != sizeof(prefix))
+            return 1;
+
+        result[0] = 1;
+        result[1] = 2;
+        result[2] = 3;
+        result[3] = 4;
+
+        if (gem5_write_file(result, sizeof(result), sizeof(prefix), output_name)
+            != sizeof(result))
+            return 1;
+        return 0;
+    }
+
+The call at offset 0 creates/truncates result.bin. The next call writes at
+offset 3, so this example produces exactly 7 bytes: 47 35 0a 01 02 03 04.
+The helper's fence makes the computed bytes visible before gem5 copies them.
+Always compare the returned byte count with the requested count.
+
+For one raw buffer with no prefix, use a single call with offset 0 after
+producing the data. For several chunks, call first at offset 0, then use
+the exact cumulative byte offset for each later chunk. Reusing offset 0
+creates/truncates the file again. You do not need an image header unless
+the file format itself requires one.
+
+4. Build with your project's existing bare-metal toolchain
+---------------------------------------------------------
+Rebuild the program with the new helper. No new gem5 library is required by
+the inline-assembly version above. For this repository's CMake setup, a
+bare-metal target named MY_APP_gem5 can be built with:
+
+    cmake --build build --target MY_APP_gem5
+
+Replace MY_APP_gem5 with your actual target. This XiangShan --raw-cpt config
+loads the raw .bin made from the bare-metal ELF. Another gem5 config may load
+an ELF instead; use the image type expected by YOUR existing run command.
+
+5. Run gem5 and choose a host output directory
+----------------------------------------------
+Replace each example path below with your real paths. Run from your project's
+build directory so simulator side files stay with that build:
+
+    export GEM5_BIN=/absolute/path/to/GEM5/build/RISCV/gem5.opt
+    export GEM5_CONFIG=/absolute/path/to/GEM5/configs/example/kmhv3.py
+    export GUEST_BIN=/absolute/path/to/your/project/build/MY_APP.bin
+    export HOST_OUT=/absolute/path/to/your/project/build/my_app-m5out
+    cd /absolute/path/to/your/project/build
+    "$GEM5_BIN" --remote-gdb-port=0 -d "$HOST_OUT" "$GEM5_CONFIG" \
+        --raw-cpt --generic-rv-cpt="$GUEST_BIN" --disable-difftest
+
+-d chooses where host output files go. --generic-rv-cpt selects the guest
+binary for this config. Keep any other arguments from your existing working
+gem5 command. In this example, the output is $HOST_OUT/result.bin. You do
+not need to change or relocate the GEM5 checkout or its files.
+
+6. Check the host file
+----------------------
+For the seven-byte example above, run on the host:
+
+    ls -l "$HOST_OUT/result.bin"
+    wc -c "$HOST_OUT/result.bin"
+    od -An -tx1 "$HOST_OUT/result.bin"
+
+Expected length: 7 bytes. Expected hexadecimal bytes: 47 35 0a 01 02 03 04.
+For your own project, compare against the size and data YOU intended to write.
+If no file appears, inspect the -d directory, the guest filename, write
+return values, and whether your gem5 build supports M5OP_WRITE_FILE. A run
+script that pipes output to tee may report success even if gem5 fails, so
+verify the actual host file.
+
+For image output
+----------------
+The gem5 operation copies bytes; it does not create a BMP/PNG/PGM format for
+you. Write your format's header and metadata, then pixel bytes at the correct
+offset. Update dimensions, row padding, and file size when your image changes.
+The buffer size passed to gem5 can be any valid byte count; it is not tied
+to Sobel or to 512x512 images. See example/source/T2_Sobel/steps.txt for the
+working 512x512 BMP example in this repository.
+
+Optional: clone a tested implementation
+---------------------------------------
+If you want to compare your project with this repository's implementation,
+clone the published SobelLib branch into a separate workspace directory:
+
+    cd /absolute/path/to/workspace
+    git clone --branch SobelLib https://github.com/mohamedatef2001/RISCV_Academy.git
+    cd RISCV_Academy
+    sed -n '25,65p' example/source/T2_Sobel/gem5_output.h
+
+That header contains the same write-file instruction. Its BMP-specific
+header, palette, and dimensions are not needed for other output formats.
