@@ -1,0 +1,1 @@
+/usr/bin/riscv64-linux-gnu-g++ -march=rv64gcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zknd_zkne_zknh_zkr_zksed_zksh_zkt -mabi=lp64d -mcmodel=medany -fno-pic -static     -fdata-sections -ffunction-sections -fno-rtti -fno-exceptions -O3 -DNDEBUG CMakeFiles/T2_Sobel_qemu.dir/T2_Sobel.cpp.obj -o T2_Sobel_qemu 
