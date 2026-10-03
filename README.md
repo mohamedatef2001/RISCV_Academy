@@ -1,5 +1,79 @@
 # RISC-V_CV
 
+## Purpose of the `SobelLib` branch
+
+This branch is a worked example showing how a **bare-metal RISC-V program
+running on XiangShan gem5 can write an output file directly to the host**.
+The Sobel edge-detection algorithm is used as the test workload: both QEMU and
+gem5 calculate the same 512 x 512 image and write `T2_Sobel_output.bmp`.
+
+The bare-metal program cannot use normal Linux `fopen`/`fwrite` calls. Instead,
+[`riscv_gem5_file.hpp`](lib/include/riscv_gem5_file.hpp) invokes gem5's existing
+`m5_write_file` pseudo-operation. gem5 then copies the calculated bytes from
+guest memory into a host file below its `-d` output directory. This tested
+method does **not** modify gem5 source code, but the selected gem5 fork must
+already support the RISC-V `M5OP_WRITE_FILE` operation.
+
+Start with the complete guide in
+[How to make gem5 write files](<How to make gem5 write files/README.md>).
+It explains the instruction and register arguments, memory fence, output
+offsets, direct gem5 command, verification steps, and troubleshooting. The
+[Sobel worked example](<How to make gem5 write files/SOBEL_EXAMPLE.md>) maps
+each part of the demonstration to its source file.
+
+### Build and test this branch
+
+Install the prerequisites described in [`SETUP.md`](SETUP.md), then configure
+the repository from its root directory:
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64_xs_toolchain.cmake \
+  -DNEXUS_AM_HOME=/absolute/path/to/nexus-am \
+  -DGEM5_HOME=/absolute/path/to/GEM5 \
+  -DQEMU_BINARY="$(command -v qemu-riscv64)"
+```
+
+First run the focused correctness test:
+
+```bash
+cmake --build build --target run_Sobel_test_qemu
+```
+
+Generate the comparison image with QEMU and then with bare-metal gem5:
+
+```bash
+cmake --build build --target run_SobelWriteFile_example_qemu
+cmake --build build --target run_SobelWriteFile_example_gem5
+```
+
+The images are written to:
+
+```text
+QEMU: build/example/T2_Sobel_output.bmp
+gem5: build/example/SobelWriteFile_example_gem5-m5out/T2_Sobel_output.bmp
+```
+
+Verify that both environments produced exactly the same file:
+
+```bash
+cmp build/example/T2_Sobel_output.bmp \
+    build/example/SobelWriteFile_example_gem5-m5out/T2_Sobel_output.bmp
+```
+
+`cmp` prints nothing and returns success when the files are identical. A valid
+output is a 263222-byte, 512 x 512, 8-bit BMP. Run the cycle-accurate scalar
+versus RVV comparison separately:
+
+```bash
+cmake --build build --target run_Sobel_benchmark_gem5
+```
+
+The benchmark results are printed to the terminal and saved in
+`build/benchmark/Sobel_benchmark_gem5.log`.
+
+## Repository overview
+
 A RISC-V image-processing library (`vec::` kernels) with a scalar reference
 implementation (`ref::`), unit tests, and benchmarks. The whole project
 cross-compiles to RISC-V and builds **two images per test/benchmark**:
@@ -89,18 +163,6 @@ meaningless on a cycle-level simulator). Each gem5 run writes a raw UART log to
 `build/<dir>/<target>.log` and gem5 stats to `build/<dir>/<target>-m5out/`.
 Each qemu run tees to `build/<dir>/<target>.log` (e.g. `unit_tests_qemu.log`).
 
-The `SobelLib` branch also contains a complete Sobel vertical slice and a
-bare-metal host-file example:
-
-```bash
-cmake --build build --target run_Sobel_test_qemu
-cmake --build build --target run_Sobel_benchmark_gem5
-cmake --build build --target run_SobelWriteFile_example_gem5
-```
-
-See [How to make gem5 write files](<How to make gem5 write files/README.md>)
-for the reusable method and exact output paths.
-
 ## Configuration variables
 
 All install locations and flags are CMake cache variables, so anyone can point
@@ -115,7 +177,7 @@ build files. Pass them with `-D<VAR>=value` at configure time.
 | `GEM5_CONFIG` | `${GEM5_HOME}/configs/example/kmhv3.py` | gem5 config script |
 | `GEM5_EXTRA_ARGS` | `--disable-difftest` | Extra gem5 config arguments |
 | `QEMU_BINARY` | `qemu-riscv64` on PATH | qemu-riscv64 user-mode emulator |
-| `QEMU_CPU` | `max` | QEMU `-cpu` (default `max` for RVV + bitmanip/crypto) |
+| `QEMU_CPU` | `max,vlen=128` | QEMU `-cpu` configuration for RVV + bitmanip/crypto |
 | `QEMU_EXTRA_ARGS` | (empty) | Extra qemu-riscv64 arguments |
 | `RISCV_TOOLCHAIN_PREFIX` | `riscv64-linux-gnu-` | GNU toolchain triple prefix |
 | `AM_ARCH` | `riscv64-xs` | nexus-am target architecture |

@@ -170,4 +170,6 @@ build/example/SobelWriteFile_example_direct-m5out/T2_Sobel_output.bmp
 `gem5_update/` contains the earlier experiment snapshots imported from the
 `RgbToGray_task` branch. They are retained for review history, but the active
 and reusable implementation is `lib/include/riscv_gem5_file.hpp`, and this
-directory contains the current instructions.
+directory contains the current instructions. Files ending in `.orig` preserve
+the pre-restructure layout; paths or include names inside them are historical
+and are not expected to exist in the active source tree.

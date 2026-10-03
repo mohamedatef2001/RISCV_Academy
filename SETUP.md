@@ -1,4 +1,4 @@
-# Setup: XS-GEM5 + nexus-am + RISCV-CV
+# Setup: XS-GEM5 + nexus-am + RISCV_Academy
 
 From an empty machine to a benchmark running on the simulator. Validated on
 Ubuntu 26.04 (GCC 15.2, binutils 2.46, CMake 4.2.3).
@@ -9,7 +9,7 @@ The three repos live side by side. This document assumes `~/workspace`:
 ~/workspace/
 ├── GEM5/       # XiangShan gem5 fork (the simulator)
 ├── nexus-am/   # bare-metal runtime (am + klib)
-└── RISCV-CV/   # this project
+└── RISCV_Academy/   # this project
 ```
 
 ## 1. Host packages
@@ -32,7 +32,7 @@ with `qemu-riscv64 --version`.
 mkdir -p ~/workspace && cd ~/workspace
 git clone https://github.com/OpenXiangShan/GEM5.git
 git clone https://github.com/OpenXiangShan/nexus-am.git
-git clone https://github.com/AhmedFathySV/RISCV-CV.git
+git clone https://github.com/mohamedatef2001/RISCV_Academy.git
 ```
 
 ## 3. Build DRAMsim3 inside gem5
@@ -74,15 +74,15 @@ export AM_HOME=$PWD
 make ARCH=riscv64-xs LINUX_GNU_TOOLCHAIN=1
 ```
 
-## 6. Build RISCV-CV
+## 6. Build RISCV_Academy
 
 ```bash
-cd ~/workspace/RISCV-CV
+cd ~/workspace/RISCV_Academy
 cmake -S . -B build \
   -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64_xs_toolchain.cmake \
   -DNEXUS_AM_HOME=$HOME/workspace/nexus-am \
   -DGEM5_HOME=$HOME/workspace/GEM5
-cmake --build build -j$1
+cmake --build build -j$(nproc)
 ```
 
 Configure fails fast if nexus-am or `gem5.opt` is missing, which is why steps
@@ -91,19 +91,22 @@ Configure fails fast if nexus-am or `gem5.opt` is missing, which is why steps
 ## 7. Run
 
 ```bash
-cmake --build build --target run_Add_benchmark_qemu   # fast functional
-cmake --build build --target run_Add_benchmark_gem5   # cycle-accurate gem5
-ctest --test-dir build --output-on-failure
+cmake --build build --target run_Sobel_test_qemu
+cmake --build build --target run_SobelWriteFile_example_qemu
+cmake --build build --target run_SobelWriteFile_example_gem5
+cmake --build build --target run_Sobel_benchmark_gem5
 ```
 
 Logs land in `build/<dir>/<name>.log`, gem5 stats in `build/<dir>/<name>-m5out/`.
-Expected benchmark result (128x100, 3 iterations, KMHV3 model):
+The generated comparison images are:
 
-```
-CLAMP:  reference 196516 cycles / vectorized 8048 cycles -> 24.41x
-WRAP:   reference 206603 cycles / vectorized 6512 cycles -> 31.72x
-Output is correct.
+```text
+QEMU: build/example/T2_Sobel_output.bmp
+gem5: build/example/SobelWriteFile_example_gem5-m5out/T2_Sobel_output.bmp
 ```
 
 gem5 prints assorted `warn:` lines during the run (uartlite, MicroTAGE, issue
 queue) — those are normal.
+
+See [How to make gem5 write files](<How to make gem5 write files/README.md>)
+for output verification, the direct gem5 command, and troubleshooting.
