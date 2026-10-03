@@ -1,4 +1,0 @@
-pc,type,mispredicts,total,misPermil,dirMiss,tgtMiss,noPredMiss
-800001cc,0,511,260100,1,510,0,1
-800001d6,0,1,510,1,1,0,0
-80000256,0,2,32768,0,1,0,1

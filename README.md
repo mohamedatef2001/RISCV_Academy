@@ -89,6 +89,18 @@ meaningless on a cycle-level simulator). Each gem5 run writes a raw UART log to
 `build/<dir>/<target>.log` and gem5 stats to `build/<dir>/<target>-m5out/`.
 Each qemu run tees to `build/<dir>/<target>.log` (e.g. `unit_tests_qemu.log`).
 
+The `SobelLib` branch also contains a complete Sobel vertical slice and a
+bare-metal host-file example:
+
+```bash
+cmake --build build --target run_Sobel_test_qemu
+cmake --build build --target run_Sobel_benchmark_gem5
+cmake --build build --target run_SobelWriteFile_example_gem5
+```
+
+See [How to make gem5 write files](<How to make gem5 write files/README.md>)
+for the reusable method and exact output paths.
+
 ## Configuration variables
 
 All install locations and flags are CMake cache variables, so anyone can point
@@ -156,8 +168,12 @@ build files. Pass them with `-D<VAR>=value` at configure time.
 
 - **qemu-user** — `Image::Read("in.pgm")` and `Image::Write("out.pgm")` use hosted
   libc to read/write PGM (P2/P5) and PPM (P3/P6). Writes are always binary P5/P6.
-- **gem5** — no file I/O on the bare-metal runtime. Images are compiled in as
-  headers (`scripts/image_to_header.py`) and loaded with
-  `Image::Read(width, height, data)`. `Write` is not supported on gem5.
+- **gem5 input** — images can be compiled in as headers
+  (`scripts/image_to_header.py`) and loaded with
+  `Image::Read(width, height, data)`.
+- **gem5 output** — normal `fopen`/`fwrite` is unavailable in the bare-metal
+  guest, but `lib/include/riscv_gem5_file.hpp` exposes gem5's host-side
+  `m5_write_file` pseudo-operation. The Sobel example writes a BMP under the
+  simulator's `-d` directory without QEMU.
 
 See [IMAGEIO.md](IMAGEIO.md) for formats and examples.
