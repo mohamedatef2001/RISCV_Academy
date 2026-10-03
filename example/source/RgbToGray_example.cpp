@@ -1,4 +1,4 @@
-#include "RgbToGray.hpp"
+#include "riscv_cv.hpp"
 
 #include <cctype>
 #include <cstdio>
@@ -76,12 +76,13 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // The source file is in T1_RGBtoGRY/source.
-    std::string task_dir = __FILE__;
-    task_dir.resize(task_dir.find_last_of('/'));
-    task_dir.resize(task_dir.find_last_of('/'));
-    const std::string default_input = task_dir + "/images/sample_640×426.ppm";
-    const std::string default_output = task_dir + "/output/RgbToGray_ppm_output.pgm";
+    // The source file is in example/source.
+    std::string project_dir = __FILE__;
+    project_dir.resize(project_dir.find_last_of('/'));
+    project_dir.resize(project_dir.find_last_of('/'));
+    project_dir.resize(project_dir.find_last_of('/'));
+    const std::string default_input = project_dir + "/images/sample_640×426.ppm";
+    const std::string default_output = project_dir + "/images/RgbToGray_ppm_output.pgm";
 
     const char* input_path = argc >= 2 ? argv[1] : default_input.c_str();
     const char* output_path = argc == 3 ? argv[2] : default_output.c_str();
@@ -98,7 +99,7 @@ int main(int argc, char* argv[])
     const std::size_t pixel_count =
         static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
     std::vector<std::uint8_t> gray(pixel_count);
-    RgbToGray(rgb.data(), gray.data(), pixel_count);
+    vec::RgbToGray(rgb.data(), gray.data(), pixel_count);
 
     if (!WritePgm(output_path, width, height, gray))
     {
