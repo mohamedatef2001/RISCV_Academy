@@ -152,6 +152,66 @@ build files. Pass them with `-D<VAR>=value` at configure time.
   target (e.g. `unit_tests_qemu`) and creates `run_<target>` plus a ctest entry
   that runs the ELF under `qemu-riscv64`; ctest uses the guest exit code.
 
+## RGB-to-gray RVV intrinsics
+
+The RVV implementation is in
+[`lib/source/image_RgbToGray.cpp`](lib/source/image_RgbToGray.cpp). Include
+`<riscv_vector.h>` and compile with the vector extension enabled, as this
+project does through `-march=rv64gcv...`.
+
+The kernel represents the floating-point weights `0.299`, `0.587`, and `0.114`
+as Q24 integers. It evaluates the following expression with integer vector
+instructions, so neither floating-point operations nor integer division are
+needed:
+
+```text
+gray = (5016388 * red + 9848226 * green + 1912603 * blue + 2^23) >> 24
+```
+
+Every data-processing intrinsic below takes `vl` as its final argument. Only
+the first `vl` lanes are active, which lets the same loop handle a full vector
+and the final partial vector safely.
+
+| Intrinsic | RVV operation | How it is used |
+| --- | --- | --- |
+| `__riscv_vsetvlmax_e32m8()` | `vsetvli`, SEW=32, LMUL=8 | Returns the maximum number of 32-bit lanes available for one block. `e32` selects 32-bit elements and `m8` groups eight vector registers. |
+| `__riscv_vlse8_v_u8m2(base, stride, vl)` | `vlse8.v` | Loads `vl` unsigned bytes separated by `stride` bytes. With `stride = 3`, calls at `rgb`, `rgb + 1`, and `rgb + 2` load the red, green, and blue channels from packed RGB pixels. |
+| `__riscv_vzext_vf4_u32m8(src, vl)` | `vzext.vf4` | Zero-extends unsigned 8-bit lanes to unsigned 32-bit lanes. The `vf4` suffix means the destination elements are four times wider. |
+| `__riscv_vmul_vx_u32m8(vector, scalar, vl)` | `vmul.vx` | Multiplies every 32-bit vector lane by one scalar Q24 color weight. `vx` means vector-scalar operands. |
+| `__riscv_vadd_vv_u32m8(lhs, rhs, vl)` | `vadd.vv` | Adds two vectors lane by lane; used to combine the three weighted channels. `vv` means vector-vector operands. |
+| `__riscv_vadd_vx_u32m8(vector, scalar, vl)` | `vadd.vx` | Adds the Q24 value `2^23` to every lane so the later shift rounds to the nearest integer. |
+| `__riscv_vnsrl_wx_u16m4(wide, shift, vl)` | `vnsrl.wx` | Logically shifts each 32-bit lane right by 24 and narrows it to 16 bits. `wx` means a wide vector source and scalar shift amount. |
+| `__riscv_vnsrl_wx_u8m2(wide, shift, vl)` | `vnsrl.wx` | Narrows the 16-bit result to 8 bits. This kernel uses a zero shift because the Q24 shift was already applied. |
+| `__riscv_vse8_v_u8m2(base, vector, vl)` | `vse8.v` | Stores the first `vl` grayscale bytes contiguously to the output image. |
+
+A typical strip-mined RVV loop follows this pattern:
+
+```cpp
+const std::size_t block_pixels = __riscv_vsetvlmax_e32m8();
+for (std::size_t pixel = 0; pixel < pixel_count;)
+{
+    const std::size_t remaining = pixel_count - pixel;
+    const std::size_t vl = remaining < block_pixels ? remaining : block_pixels;
+
+    const std::uint8_t* input = rgb + 3 * pixel;
+    const vuint8m2_t red = __riscv_vlse8_v_u8m2(input, 3, vl);
+    const vuint32m8_t red_q24 = __riscv_vmul_vx_u32m8(
+        __riscv_vzext_vf4_u32m8(red, vl), 5016388, vl);
+
+    // Process green and blue, add the three vectors and rounding bias,
+    // narrow to uint8_t, then store vl output pixels.
+    pixel += vl;
+}
+```
+
+Use the
+[RVV Intrinsics Viewer](https://dzaima.github.io/intrinsics-viewer/#0q1YqVbJSKsosTtYtU9JRSoVzFMsSU1LiyyriMy1yjYAyiUpW0UplSrE6SskglmdeSWp6ahFQwi0nP7EEROfnpCjF1gIA)
+to look up intrinsic signatures and their corresponding assembly instructions.
+When using GCC 13, also consult its
+[RVV intrinsic documentation](https://gcc.gnu.org/onlinedocs/gcc-13.1.0/gcc/RISC-V-Vector-Intrinsics.html):
+that compiler implements intrinsic specification version 0.11 and does not
+provide every newer tuple or explicit rounding-mode intrinsic form.
+
 ## Image I/O
 
 - **qemu-user** — `Image::Read("in.pgm")` and `Image::Write("out.pgm")` use hosted

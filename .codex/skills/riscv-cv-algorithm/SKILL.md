@@ -46,6 +46,10 @@ dependency, generated asset, or exceptional target requirement.
 2. Write the production `vec::` implementation with RVV intrinsics. Use dynamic
    `vsetvl` loops, handle tails safely, and never assume a fixed hardware VLEN.
    Match scalar semantics exactly and retain bare-metal and QEMU compatibility.
+   Use the [RVV Intrinsics Viewer](https://dzaima.github.io/intrinsics-viewer/#0q1YqVbJSKsosTtYtU9JRSoVzFMsSU1LiyyriMy1yjYAyiUpW0UplSrE6SskglmdeSWp6ahFQwi0nP7EEROfnpCjF1gIA)
+   to look up intrinsic names, signatures, types, and corresponding instructions;
+   confirm the selected intrinsic is supported by the repository's configured
+   compiler and RVV version.
 3. Add deterministic parameterized tests that compare vector output directly
    with the scalar oracle. Cover small inputs, exact vector chunks, tails,
    multiple rows, supported parameter variants, and operation-specific boundary
