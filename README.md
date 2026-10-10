@@ -161,3 +161,138 @@ build files. Pass them with `-D<VAR>=value` at configure time.
   `Image::Read(width, height, data)`. `Write` is not supported on gem5.
 
 See [IMAGEIO.md](IMAGEIO.md) for formats and examples.
+
+## BoxFilter Task
+
+The `BoxFilter_Task` branch implements a uniform 3x3 filter for 8-bit
+grayscale images. Every non-border result is calculated with integer division:
+
+```text
+output[y][x] = floor((top[x-1] + top[x] + top[x+1]
+                    + mid[x-1] + mid[x] + mid[x+1]
+                    + bot[x-1] + bot[x] + bot[x+1]) / 9)
+```
+
+The first and last rows and columns are copied unchanged. Images smaller than
+3x3 are also copied unchanged. Both implementations support input and output
+referring to the same image.
+
+### BoxFilter files
+
+- Scalar correctness reference:
+  [`test/reference/source/image_BoxFilter.cpp`](test/reference/source/image_BoxFilter.cpp)
+- RVV implementation:
+  [`lib/source/image_BoxFilter.cpp`](lib/source/image_BoxFilter.cpp)
+- Unit tests:
+  [`test/unit_test/source/BoxFilter_test.cpp`](test/unit_test/source/BoxFilter_test.cpp)
+- One-iteration benchmark:
+  [`benchmark/source/BoxFilter_benchmark.cpp`](benchmark/source/BoxFilter_benchmark.cpp)
+
+### Scalar approach
+
+The scalar version visits every interior output pixel, loads its complete 3x3
+neighborhood, accumulates the nine bytes in a wider integer, divides by nine,
+and stores the result. It is the correctness oracle for the RVV output.
+
+### RVV approach
+
+The image bytes are row-major in memory. The middle-row pointer is one image
+width after the top-row pointer, and the bottom-row pointer is one width after
+the middle row.
+
+For each output row, the RVV loop processes a dynamic number of pixels:
+
+1. Load `vl + 2` bytes from each of the top, middle, and bottom rows.
+2. Add the three rows vertically into one 16-bit vector.
+3. Slide that vector by one and two lanes and add the three horizontal
+   positions into the output accumulator.
+4. Divide every 3x3 sum by nine using an exact unsigned multiply-high with
+   `7282`, then narrow to 8 bits.
+5. Store the completed output vector once.
+
+The vector sequence per chunk is:
+
+```text
+3 vector loads
+2 widening vertical additions
+2 vector slides
+2 horizontal additions
+1 unsigned multiply-high
+1 narrowing operation
+1 vector store
+```
+
+Partial sums remain in vector registers until the final store, so the normal
+out-of-place path does not need a temporary image buffer. A snapshot is
+allocated only when the caller explicitly requests in-place filtering.
+
+The implementation uses dynamic vector-length chunking and is not tied to one
+VLEN. Two look-ahead lanes are reserved for the horizontal window. With
+VLEN=128 and the `e16m8` accumulator, for example, VLMAX is 64 lanes and one
+full chunk produces 62 output pixels from 64 loaded pixels. A smaller `vl` is
+used for the tail without reading beyond the row.
+
+The largest 3x3 sum is `9 * 255 = 2295`. Over this complete range, the high
+half of `sum * 7282`, where `7282 = ceil(2^16 / 9)`, is exactly
+`floor(sum / 9)`. This preserves the scalar result without vector division.
+
+### Run the BoxFilter tests
+
+```bash
+# Fast functional validation
+cmake --build build --target run_BoxFilter_test_qemu
+
+# Cycle-accurate validation
+cmake --build build --target run_BoxFilter_test_gem5
+```
+
+The tests compare scalar and RVV output across different image sizes, vector
+tails, maximum pixel values, borders, and in-place operation.
+
+### Benchmark scalar versus RVV
+
+The benchmark is configured for exactly one iteration. It runs the scalar
+implementation once and the RVV implementation once, checks that their output
+matches, and reports cycles and retired instructions for both.
+
+```bash
+# Fast functional benchmark
+cmake --build build --target run_BoxFilter_benchmark_qemu
+
+# Cycle-accurate performance benchmark
+cmake --build build --target run_BoxFilter_benchmark_gem5
+```
+
+The gem5 run can take substantially longer than QEMU. Its console log and
+statistics are written to:
+
+```text
+build/benchmark/BoxFilter_benchmark_gem5.log
+build/benchmark/BoxFilter_benchmark_gem5-m5out/
+```
+
+The reported 60,000-cycle and 20,000-instruction values are non-gating stretch
+targets. They do not stop the run or determine correctness.
+
+### Run the BoxFilter visualization
+
+The interactive, step-by-step website is in
+[`boxfilter-visualizer/`](boxfilter-visualizer/). Start the server from the
+repository root because the page loads the sample image from `images/`:
+
+```bash
+python3 -m http.server 8000
+```
+
+Open <http://localhost:8000/boxfilter-visualizer/#rvv>.
+
+The page visualizes the memory layout, three row loads, vertical reduction,
+slides, horizontal accumulation, divide-by-nine conversion, narrowing, and
+final store. If port 8000 reports `Address already in use`, the existing server
+is usually still running. Open the link above, or use another port:
+
+```bash
+python3 -m http.server 8001
+```
+
+Then open <http://localhost:8001/boxfilter-visualizer/#rvv>.
