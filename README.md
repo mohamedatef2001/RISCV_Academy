@@ -236,6 +236,35 @@ The largest 3x3 sum is `9 * 255 = 2295`. Over this complete range, the high
 half of `sum * 7282`, where `7282 = ceil(2^16 / 9)`, is exactly
 `floor(sum / 9)`. This preserves the scalar result without vector division.
 
+### RVV instructions used
+
+The implementation uses RVV C intrinsics from `<riscv_vector.h>`. The compiler
+maps these intrinsics to the following vector instructions:
+
+| Intrinsic / instruction | Purpose in BoxFilter |
+| --- | --- |
+| `__riscv_vsetvlmax_e16m8` / `vsetvli` | Finds VLMAX for 16-bit elements with LMUL=8. The loop reserves two of those lanes as horizontal look-ahead pixels. Additional `vsetvli` instructions select the required element width and active `vl` for each operation. |
+| `__riscv_vle8_v_u8m4` / `vle8.v` | Performs three unit-stride byte loads: one each for the top, middle, and bottom rows. Each load reads `vl + 2` pixels. |
+| `__riscv_vwaddu_vv_u16m8` / `vwaddu.vv` | Adds the unsigned 8-bit top and middle pixels and widens each result to 16 bits, preventing overflow. |
+| `__riscv_vwaddu_wv_u16m8` / `vwaddu.wv` | Adds the unsigned 8-bit bottom pixels to the existing 16-bit vertical sums. |
+| `__riscv_vslidedown_vx_u16m8` / `vslidedown.vx` | Produces the vertical sums for horizontal offsets `+2` and `+1`. This reuses the three loaded rows instead of loading all nine kernel positions separately. |
+| `__riscv_vadd_vv_u16m8` / `vadd.vv` | Adds the base, `+1`, and `+2` vertical columns to form every complete 3x3 sum. Two vector additions are required. |
+| `__riscv_vmulhu_vx_u16m8` / `vmulhu.vx` | Multiplies every 16-bit sum by `7282` and keeps the upper 16 bits, implementing exact floor division by nine for sums from 0 through 2295. |
+| `__riscv_vnsrl_wx_u8m4` / `vnsrl.wi` | Narrows the final unsigned 16-bit quotients to 8-bit output pixels. The shift amount is zero because division was already completed by `vmulhu`. |
+| `__riscv_vse8_v_u8m4` / `vse8.v` | Stores the finished output vector once after all nine source pixels have been accumulated. |
+
+The row reduction can be summarized as:
+
+```text
+vertical = widen(top + middle) + bottom
+window   = vertical + slide_down(vertical, 1) + slide_down(vertical, 2)
+output   = narrow(multiply_high_unsigned(window, 7282))
+```
+
+The three source vectors and intermediate sums stay in vector registers during
+the chunk. Only the three input vectors are loaded from memory, and only the
+completed result vector is stored.
+
 ### Run the BoxFilter tests
 
 ```bash
@@ -273,6 +302,30 @@ build/benchmark/BoxFilter_benchmark_gem5-m5out/
 
 The reported 60,000-cycle and 20,000-instruction values are non-gating stretch
 targets. They do not stop the run or determine correctness.
+
+### Measured BoxFilter results
+
+The latest one-iteration gem5 result in the local
+`build/benchmark/BoxFilter_benchmark_gem5.log` uses the 640x960 image,
+VLEN=128, `e16m8` VLMAX=64, and 62 output pixels per full vector chunk:
+
+| Implementation | Cycles | Retired instructions | Pixels/cycle |
+| --- | ---: | ---: | ---: |
+| Scalar | 6,783,526 | 15,297,888 | 0.090572 |
+| RVV | 931,854 | 288,903 | 0.659331 |
+
+For this run, RVV is **7.28x faster by cycle count**, uses **52.95x fewer
+retired instructions**, reduces cycles by **86.3%**, and reduces retired
+instructions by **98.1%**. The scalar and RVV images matched exactly, and the
+benchmark ended with `Output is correct.`
+
+The RVV result did not reach the non-gating stretch targets: it was 871,854
+cycles above 60,000 and 268,903 instructions above 20,000. With this geometry,
+the 3-load plus 1-store design alone has a calculated floor of 42,152 vector
+memory instructions across all chunks, before loop control, arithmetic,
+border handling, and benchmark overhead. Results depend on the image,
+compiler, vector length, and gem5 configuration, so rerun the command above
+after implementation or simulator changes.
 
 ### Run the BoxFilter visualization
 
