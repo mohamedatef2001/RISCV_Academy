@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Interactive scalar and RISC-V Vector walkthrough of the optimized 3x3 BoxFilter kernel.">
+  <title>BoxFilter RVV Lab</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230d1218'/%3E%3Cg fill='%232dd4bf'%3E%3Crect x='10' y='10' width='12' height='12'/%3E%3Crect x='26' y='10' width='12' height='12'/%3E%3Crect x='42' y='10' width='12' height='12'/%3E%3Crect x='10' y='26' width='12' height='12'/%3E%3Crect x='26' y='26' width='12' height='12' fill='%23f5b942'/%3E%3Crect x='42' y='26' width='12' height='12'/%3E%3Crect x='10' y='42' width='12' height='12'/%3E%3Crect x='26' y='42' width='12' height='12'/%3E%3Crect x='42' y='42' width='12' height='12'/%3E%3C/g%3E%3C/svg%3E">
+  <script>
+    try {
+      const saved = localStorage.getItem('boxfilter-theme');
+      document.documentElement.dataset.theme = saved === 'sepia' ? 'sepia' : 'dark';
+    } catch (_) {}
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#overview" aria-label="BoxFilter RVV Lab home">
+      <span class="brand-mark">RVV</span>
+      <span>BoxFilter Lab</span>
+    </a>
+    <div class="theme-toggle" role="group" aria-label="Color theme">
+      <button type="button" data-theme-value="dark">Dark</button>
+      <button type="button" data-theme-value="sepia">Sepia</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">RISC-V CV · fixed 3×3 kernel</p>
+        <h1 id="page-title">Three loads. One vertical sum. Two slides.</h1>
+      </div>
+      <p>The RVV path loads top, middle, and bottom once with two look-ahead lanes. It adds the rows vertically, slides that vertical sum by one and two lanes, combines the three column alignments, divides once, and stores once.</p>
+    </section>
+
+    <nav class="tabs" role="tablist" aria-label="BoxFilter lesson">
+      <button role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" tabindex="0" data-tab="overview">Overview</button>
+      <button role="tab" id="tab-scalar" aria-controls="panel-scalar" aria-selected="false" tabindex="-1" data-tab="scalar">Scalar</button>
+      <button role="tab" id="tab-rvv" aria-controls="panel-rvv" aria-selected="false" tabindex="-1" data-tab="rvv">RVV</button>
+      <button role="tab" id="tab-performance" aria-controls="panel-performance" aria-selected="false" tabindex="-1" data-tab="performance">Performance</button>
+    </nav>
+
+    <section role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" data-panel="overview">
+      <div class="contract-grid">
+        <article class="metric-card"><span>Kernel</span><strong>3 × 3</strong><small>uniform weights</small></article>
+        <article class="metric-card"><span>Window step</span><strong>1 pixel</strong><small>overlapping output</small></article>
+        <article class="metric-card"><span>Border</span><strong>Copied</strong><small>same-size output</small></article>
+        <article class="metric-card"><span>Rounding</span><strong>Floor</strong><small>integer sum / 9</small></article>
+      </div>
+
+      <div class="image-workbench panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">Live input · images/image0.pgm</p><h2>Inspect a real neighborhood</h2></div>
+          <p id="image-status" class="status" aria-live="polite">Loading PGM…</p>
+        </div>
+        <div class="canvas-grid">
+          <figure>
+            <div class="canvas-frame"><canvas id="input-canvas" width="640" height="960" tabindex="0" aria-label="Input image; click or use arrow keys to inspect an interior pixel"></canvas><span id="input-marker" class="pixel-marker" aria-hidden="true"></span></div>
+            <figcaption>Input · click an interior pixel</figcaption>
+          </figure>
+          <figure>
+            <div class="canvas-frame"><canvas id="output-canvas" width="640" height="960" tabindex="0" aria-label="Blurred output image; click or use arrow keys to inspect a pixel"></canvas><span id="output-marker" class="pixel-marker" aria-hidden="true"></span></div>
+            <figcaption>Scalar-equivalent blur</figcaption>
+          </figure>
+          <div class="inspector" aria-live="polite">
+            <p class="eyebrow">Selected output</p>
+            <h3 id="pixel-coordinate">(320, 480)</h3>
+            <div id="neighborhood-grid" class="pixel-grid" aria-label="Selected 3 by 3 neighborhood"></div>
+            <div class="equation"><span id="sum-expression">—</span><strong id="pixel-result">—</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="comparison-grid">
+        <article class="panel approach"><p class="eyebrow accent-amber">ref::BoxFilter</p><h2>One output at a time</h2><p>Nine scalar loads, a readable nested-loop sum, then native integer division. This is the correctness oracle.</p><code>output[y][x] = sum / 9;</code></article>
+        <article class="panel approach"><p class="eyebrow accent-teal">Implemented RVV</p><h2>Vertical first + two slides</h2><p>Reduce three loaded rows to one vertical-sum vector, then use two slides and two adds to form every overlapping 3×3 result.</p><code>sum = vertical + slide1 + slide2;</code></article>
+      </div>
+    </section>
+
+    <section role="tabpanel" id="panel-scalar" aria-labelledby="tab-scalar" data-panel="scalar" hidden>
+      <div class="walkthrough-head">
+        <div><p class="eyebrow">Guided walkthrough · selected pixel</p><h2>Scalar: nine loads, one result</h2></div>
+        <div class="step-controls">
+          <button type="button" id="scalar-reset">Reset</button>
+          <button type="button" id="scalar-prev">Previous</button>
+          <button type="button" class="primary" id="scalar-next">Next</button>
+        </div>
+      </div>
+      <div class="progress-track" aria-hidden="true"><span id="scalar-progress"></span></div>
+      <div class="lesson-layout">
+        <article class="panel lesson-board">
+          <p class="step-count" id="scalar-step-count"></p>
+          <h3 id="scalar-step-title"></h3>
+          <p id="scalar-step-copy"></p>
+          <div id="scalar-grid" class="pixel-grid large"></div>
+          <div class="accumulator"><span>Accumulator</span><strong id="scalar-accumulator">0</strong></div>
+        </article>
+        <pre class="code-panel" aria-label="Scalar pseudocode"><code><span data-scalar-line="0">for (y = 1; y &lt; height - 1; ++y)</span>
+<span data-scalar-line="0">  for (x = 1; x &lt; width - 1; ++x) {</span>
+<span data-scalar-line="1">    uint16_t sum = 0;</span>
+<span data-scalar-line="2">    for (ky = -1; ky &lt;= 1; ++ky)</span>
+<span data-scalar-line="2">      for (kx = -1; kx &lt;= 1; ++kx)</span>
+<span data-scalar-line="2">        sum += input[y + ky][x + kx];</span>
+<span data-scalar-line="3">    output[y][x] = sum / 9;</span>
+<span data-scalar-line="4">  }</span></code></pre>
+      </div>
+    </section>
+
+    <section role="tabpanel" id="panel-rvv" aria-labelledby="tab-rvv" data-panel="rvv" hidden>
+      <div class="walkthrough-head">
+        <div><p class="eyebrow">Guided walkthrough · exact emitted sequence</p><h2>RVV: vertical sum, then two horizontal slides</h2></div>
+        <div class="step-controls">
+          <button type="button" id="rvv-reset">Reset</button>
+          <button type="button" id="rvv-prev">Previous</button>
+          <button type="button" class="primary" id="rvv-next">Next</button>
+        </div>
+      </div>
+      <div class="progress-track" aria-hidden="true"><span id="rvv-progress"></span></div>
+      <div class="rvv-layout">
+        <article class="panel register-board">
+          <div class="stage-copy"><p class="step-count" id="rvv-step-count"></p><h3 id="rvv-step-title"></h3><p id="rvv-step-copy"></p></div>
+          <p class="lane-note"><strong>Only three input loads occur per chunk.</strong> The two look-ahead lanes allow <code>vslidedown(vertical, 1)</code> and <code>vslidedown(vertical, 2)</code> to form overlapping windows entirely in registers.</p>
+          <div id="register-stack" class="register-stack"></div>
+          <div id="equivalence-proof" class="equivalence-proof" hidden></div>
+          <div id="division-trace" class="division-trace" hidden></div>
+        </article>
+        <pre class="code-panel rvv-code" aria-label="RVV pseudocode"><code><span data-rvv-line="0">for each output row y:</span>
+<span data-rvv-line="0">  for each vector chunk x:</span>
+<span data-rvv-line="1">    top = load(top_ptr + x, vl + 2);</span>
+<span data-rvv-line="2">    mid = load(mid_ptr + x, vl + 2);</span>
+<span data-rvv-line="3">    bot = load(bot_ptr + x, vl + 2);</span>
+<span data-rvv-line="4">    vertical = widen_add(top, mid);</span>
+<span data-rvv-line="5">    vertical = widen_add(vertical, bot);</span>
+<span data-rvv-line="6">    plus2 = slide_down(vertical, 2);</span>
+<span data-rvv-line="7">    sum = plus2 + vertical;</span>
+<span data-rvv-line="8">    plus1 = slide_down(vertical, 1);</span>
+<span data-rvv-line="9">    sum = sum + plus1;</span>
+<span data-rvv-line="10">    quotient = mul_high(sum, 7282);</span>
+<span data-rvv-line="11">    pixels = narrow_u8(quotient);</span>
+<span data-rvv-line="12">    store(output_ptr + x, pixels);</span>
+<span data-rvv-line="13">  // advance to the next three row-vector chunk</span></code></pre>
+      </div>
+      <p class="source-note"><strong>Implemented and assembly-checked:</strong> the C++ RVV kernel emits 3 loads, 2 widening additions, 2 slides, 2 horizontal additions, multiply-high, narrow, and 1 store, with no whole-register spills.</p>
+    </section>
+
+    <section role="tabpanel" id="panel-performance" aria-labelledby="tab-performance" data-panel="performance" hidden>
+      <div class="section-heading performance-heading">
+        <div><p class="eyebrow">Full image · structural analysis</p><h2>What the vector shape costs</h2></div>
+        <p>The measured values belong to an older kernel. The new three-load vertical-first implementation is built and awaiting your QEMU and gem5 runs.</p>
+      </div>
+      <div class="performance-grid">
+        <article class="metric-card large"><span>Image</span><strong>640 × 960</strong><small>614,400 pixels</small></article>
+        <article class="metric-card large"><span>Vector geometry</span><strong>64 → 62</strong><small>two lanes reserved as look-ahead</small></article>
+        <article class="metric-card large"><span>Vector chunks</span><strong>10,538</strong><small>11 chunks × 958 interior rows</small></article>
+        <article class="metric-card large"><span>Memory floor</span><strong>42,152</strong><small>3 loads + 1 store per chunk</small></article>
+      </div>
+      <div class="panel lower-bound">
+        <div><p class="eyebrow accent-magenta">Three loads, two slides</p><h3>Vertical reduction minimizes both memory traffic and alignment work.</h3><p>Each chunk loads top, middle, and bottom once, forms one vertical sum, uses two slides, and stores one completed output vector.</p></div>
+        <div class="bound-equation"><span>10,538 chunks</span><b>×</b><span>4 memory ops</span><b>=</b><strong>42,152</strong></div>
+      </div>
+      <div class="results-table-wrap panel">
+        <table class="results-table">
+          <thead><tr><th>Metric</th><th>Average</th><th>Minimum observed</th><th>Stretch target</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><th>Vector cycles</th><td id="average-cycles">Not measured</td><td id="minimum-cycles">Not measured</td><td>60,000</td><td id="cycles-status"><span class="status-chip pending">Stopped</span></td></tr>
+            <tr><th>Retired instructions</th><td id="average-instructions">Not measured</td><td id="minimum-instructions">Not measured</td><td>20,000</td><td id="instructions-status"><span class="status-chip pending">Stopped</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="performance-source" id="performance-source">The measured values belong to an older kernel. The new vertical-first implementation has a 42,152-instruction memory floor before arithmetic and loop control.</p>
+    </section>
+  </main>
+
+  <footer><span>RISCV_Academy · BoxFilter_Task</span><code>ref::BoxFilter ↔ vec::BoxFilter</code></footer>
+  <script src="performance-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

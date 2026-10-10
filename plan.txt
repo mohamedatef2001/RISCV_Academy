@@ -1,0 +1,32 @@
+BoxFilter 3x3 implementation checklist
+======================================
+
+[x] Copy and validate the repository-scoped riscv-cv-algorithm skill.
+[x] Add matching ref::BoxFilter and vec::BoxFilter APIs for grayscale uint8_t images.
+[x] Preserve image size, copy the one-pixel border, use stride-1 overlapping windows,
+    floor(sum / 9), and support in-place calls through an input snapshot.
+[x] Implement the scalar reference with direct nested loops and native integer division.
+[x] Implement the RVV kernel with three interleaved row loads, overlapping horizontal
+    triplets formed by slides of one and two lanes, lane-for-lane 16-bit accumulation,
+    exact shift/add/subtract division by nine,
+    dynamic vsetvl tail handling, narrowing, and direct stores.
+[x] Add deterministic correctness tests for small images, borders, tails, all division
+    sums 0..2295, maximum values, and in-place operation.
+[ ] Benchmark the complete 640x960 image0 using three timed runs. Report averages,
+    minimum-observed cycles/instructions, a structural instruction lower bound, and
+    the non-gating 50,000-cycle / 15,000-instruction stretch target comparison.
+[x] Add BoxFilter_example using image0.pgm on QEMU and image0.hpp on gem5, producing
+    images/BoxFilter_output.pgm on QEMU.
+[x] Inspect generated RVV assembly and verify the intended load/slide/add path and the
+    absence of multiply, divide, and remainder instructions in the vector divide path.
+[x] Build boxfilter-visualizer as a dependency-free localhost site with Overview,
+    Scalar, RVV, and Performance tabs, actual image0 PGM rendering, interactive pixel
+    inspection, guided steppers, dark/sepia themes, responsive layout, and accessible
+    keyboard controls.
+[ ] Run focused and aggregate QEMU tests, QEMU benchmark/example, focused gem5 tests,
+    gem5 benchmark, PGM verification, static-site checks, and localhost smoke testing.
+    All listed checks except the intentionally stopped full gem5 benchmark are complete.
+
+The performance limits are stretch targets rather than correctness gates for the full
+614,400-pixel image. "Minimum" means the best observed value in the three controlled
+gem5 iterations, not a mathematical global optimum.
