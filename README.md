@@ -261,9 +261,8 @@ instructions, cycles per pixel, pixels per cycle, and speedup.
 
 ### Measured gem5 results
 
-The latest local gem5 run used the 640x960 image and one iteration per kernel.
-It completed the 3x3, 5x5, and 7x7 cases before the run stopped at the start of
-9x9. These are the results preserved in
+The measured gem5 results below use the 640x960 image and one iteration per
+kernel. They are preserved in
 `build/benchmark/BoxFilter_benchmark_gem5.log`:
 
 | Kernel and border | Scalar cycles | Scalar cycles/pixel | Scalar instructions | RVV cycles | RVV cycles/pixel | RVV instructions | Speedup |
@@ -280,9 +279,8 @@ different conditions.
 # Fast functional benchmark
 cmake --build build --target run_BoxFilter_benchmark_qemu
 
-# Run this yourself for cycle-accurate gem5 performance. Disable the fork's
-# default 40-million-instruction stop and its 20-million-instruction stats reset
-# so every kernel is reported in one uninterrupted run.
+# Run this yourself for cycle-accurate gem5 performance. Remove the fork's
+# default instruction limits so every kernel is reported.
 cmake -S . -B build \
   -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64_xs_toolchain.cmake \
   -DGEM5_EXTRA_ARGS="--disable-difftest --maxinsts=0 --warmup-insts-no-switch=0"
