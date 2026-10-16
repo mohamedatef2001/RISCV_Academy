@@ -21,6 +21,20 @@ and invalid-input behavior. Infer these from the request and established project
 conventions when safe. Ask the user only when an unresolved semantic choice
 would materially change the API or results.
 
+Kernel implementations must not allocate or free dynamic memory (`new`,
+`delete`, `malloc`, or equivalent). Require the caller to provide all input,
+output, and scratch storage needed by the public contract; keep any allocation
+performed by test or benchmark fixtures outside timed regions. If aliasing
+would require an internal snapshot, reject or exclude that aliasing mode
+explicitly instead of allocating implicitly.
+
+When broadening an API to support runtime parameters, retain specialized hot
+paths for established benchmark cases instead of forcing them through the
+generic fallback. Keep the public entry point OpenCV-shaped where requested,
+then dispatch internally to fixed-size kernels such as 3x3 and to a generic
+odd-kernel implementation. Record the prior gem5 cycle/instruction result and
+report the delta; do not treat QEMU CSR timing as cycle-accurate evidence.
+
 Use the current PascalCase file convention. For an operation named `<Name>`,
 place its files as follows:
 
@@ -58,8 +72,10 @@ dependency, generated asset, or exceptional target requirement.
 4. Add a benchmark using identical preallocated inputs. Keep allocation and
    initialization outside timed regions, time both implementations with the
    repository timer, check correctness, and fail on a mismatch. Report averaged
-   cycles, retired instructions, pixels per cycle, and speedup. Do not enforce a
-   minimum speedup unless the user asks for one.
+   cycles, retired instructions, pixels per cycle, and speedup. When a relevant
+   historical gem5 result exists, print its cycle/instruction deltas as a
+   non-gating regression signal. Do not enforce a minimum speedup unless the
+   user asks for one.
 
 Keep the scalar implementation in `test/reference`: it is a validation and
 benchmark oracle, not part of the production vector library. If the user asks
@@ -73,12 +89,14 @@ Build the new targets, then run these checks in order:
 1. `run_<Name>_test_qemu`
 2. `run_unit_tests_qemu`
 3. `run_<Name>_benchmark_qemu`
-4. `run_<Name>_benchmark_gem5`
+4. `run_<Name>_benchmark_gem5`, unless the user asks to run gem5 themselves
 
-Use the actual generated target spelling. The gem5 benchmark is the final
-cycle-accurate comparison. If an external dependency or simulator is
-unavailable, report the exact blocked command and the checks that did pass; do
-not claim complete validation.
+Use the actual generated target spelling. QEMU validates behavior and benchmark
+completion but its CSR timing is not a cycle-accurate performance result. The
+gem5 benchmark is the final cycle-accurate comparison. If an external dependency
+or simulator is unavailable or the user reserves the gem5 run for themselves,
+report the exact command and the checks that did pass; do not claim complete
+performance validation.
 
 ## Learn from feedback
 

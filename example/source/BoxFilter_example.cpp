@@ -30,11 +30,13 @@ int main()
 
     Image<std::uint8_t> expected(input.Width(), input.Height());
     Image<std::uint8_t> output(input.Width(), input.Height());
-    ref::BoxFilter(input, expected);
+    ref::boxFilter(input, expected, -1, Size(3, 3), Point(-1, -1), true,
+                   BORDER_REPLICATE);
 
     Timer timer;
     timer.Start();
-    vec::BoxFilter(input, output);
+    vec::boxFilter(input, output, -1, Size(3, 3), Point(-1, -1), true,
+                   BORDER_REPLICATE);
     timer.Stop();
 
     if (!CheckCorrectness(expected, output))

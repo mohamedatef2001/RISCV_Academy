@@ -2,10 +2,7 @@
 #include "reference_cv.hpp"
 #include "riscv_cv.hpp"
 
-#include <cstddef>
 #include <cstdint>
-#include <limits>
-#include <riscv_vector.h>
 
 #ifdef RISCV_QEMU
 #include <string>
@@ -15,9 +12,24 @@
 
 namespace
 {
-constexpr std::uint64_t kStretchCycles = 60000;
-constexpr std::uint64_t kStretchInstructions = 20000;
 constexpr int kIterations = 1;
+constexpr std::uint64_t kBaseline3x3VectorCycles = 931854;
+constexpr std::uint64_t kBaseline3x3VectorInstructions = 288903;
+
+struct BenchmarkCase
+{
+    const char* name;
+    Size ksize;
+    int border_type;
+};
+
+constexpr BenchmarkCase kCases[] = {
+    {"BoxFilter 3x3 constant", Size(3, 3), BORDER_CONSTANT},
+    {"BoxFilter 5x5 replicate", Size(5, 5), BORDER_REPLICATE},
+    {"BoxFilter 7x7 replicate", Size(7, 7), BORDER_REPLICATE},
+    {"BoxFilter 9x9 replicate", Size(9, 9), BORDER_REPLICATE},
+    {"BoxFilter 11x11 replicate", Size(11, 11), BORDER_REPLICATE},
+};
 
 void LoadImage0(Image<std::uint8_t>& input)
 {
@@ -33,23 +45,68 @@ void LoadImage0(Image<std::uint8_t>& input)
 #endif
 }
 
-void PrintStretchResult(const std::uint64_t minimum_cycles,
-                        const std::uint64_t minimum_instructions)
+bool RunCase(const BenchmarkCase& benchmark_case,
+             const Image<std::uint8_t>& input,
+             Image<std::uint8_t>& output_reference,
+             Image<std::uint8_t>& output_vectorized)
 {
-    const bool cycles_met = minimum_cycles <= kStretchCycles;
-    const bool instructions_met = minimum_instructions <= kStretchInstructions;
-    printf("  stretch target: <= %llu cycles, <= %llu instructions (non-gating)\n",
-           (unsigned long long)kStretchCycles,
-           (unsigned long long)kStretchInstructions);
-    printf("  minimum observed cycles: %llu (%s, delta %+lld)\n",
-           (unsigned long long)minimum_cycles, cycles_met ? "MET" : "NOT MET",
-           (long long)minimum_cycles - (long long)kStretchCycles);
-    printf("  minimum observed instructions: %llu (%s, delta %+lld)\n",
-           (unsigned long long)minimum_instructions,
-           instructions_met ? "MET" : "NOT MET",
-           (long long)minimum_instructions - (long long)kStretchInstructions);
-}
+    std::uint64_t reference_cycles = 0;
+    std::uint64_t reference_instructions = 0;
+    std::uint64_t vectorized_cycles = 0;
+    std::uint64_t vectorized_instructions = 0;
 
+    printf("\n%s: image=%dx%d, iterations=%d\n", benchmark_case.name,
+           input.Width(), input.Height(), kIterations);
+    for (int iteration = 0; iteration < kIterations; ++iteration)
+    {
+        Timer scalar_timer;
+        scalar_timer.Start();
+        ref::boxFilter(input, output_reference, -1, benchmark_case.ksize,
+                       Point(-1, -1), true, benchmark_case.border_type);
+        scalar_timer.Stop();
+
+        Timer vector_timer;
+        vector_timer.Start();
+        vec::boxFilter(input, output_vectorized, -1, benchmark_case.ksize,
+                       Point(-1, -1), true, benchmark_case.border_type);
+        vector_timer.Stop();
+
+        reference_cycles += scalar_timer.ElapsedCycles();
+        reference_instructions += scalar_timer.ElapsedInstructions();
+        vectorized_cycles += vector_timer.ElapsedCycles();
+        vectorized_instructions += vector_timer.ElapsedInstructions();
+
+        if (!CheckCorrectness(output_reference, output_vectorized))
+        {
+            printf("Output is wrong!\n");
+            return false;
+        }
+    }
+
+    PrintTime(benchmark_case.name, input.Width() * input.Height(),
+              vectorized_cycles / kIterations,
+              vectorized_instructions / kIterations,
+              reference_cycles / kIterations,
+              reference_instructions / kIterations);
+#ifdef RISCV_BAREMETAL
+    if (benchmark_case.ksize.width == 3 && benchmark_case.ksize.height == 3 &&
+        benchmark_case.border_type == BORDER_CONSTANT)
+    {
+        const std::uint64_t average_cycles = vectorized_cycles / kIterations;
+        const std::uint64_t average_instructions =
+            vectorized_instructions / kIterations;
+        printf("  prior gem5 vector baseline: %llu cycles, %llu instructions\n",
+               (unsigned long long)kBaseline3x3VectorCycles,
+               (unsigned long long)kBaseline3x3VectorInstructions);
+        printf("  vector baseline delta     : %+lld cycles, %+lld instructions\n",
+               (long long)average_cycles -
+                   (long long)kBaseline3x3VectorCycles,
+               (long long)average_instructions -
+                   (long long)kBaseline3x3VectorInstructions);
+    }
+#endif
+    return true;
+}
 } // namespace
 
 int main()
@@ -60,96 +117,17 @@ int main()
 
     Image<std::uint8_t> input;
     LoadImage0(input);
-    const int width = input.Width();
-    const int height = input.Height();
-    const int pixel_count = width * height;
+    Image<std::uint8_t> output_vectorized(input.Width(), input.Height());
+    Image<std::uint8_t> output_reference(input.Width(), input.Height());
 
-    Image<std::uint8_t> output_vectorized(width, height);
-    Image<std::uint8_t> output_reference(width, height);
-
-    printf("BoxFilter benchmark: %dx%d, %d iterations\n",
-           width, height, kIterations);
-
-    std::uint64_t reference_cycles = 0;
-    std::uint64_t reference_instructions = 0;
-    std::uint64_t vectorized_cycles = 0;
-    std::uint64_t vectorized_instructions = 0;
-    std::uint64_t minimum_vector_cycles =
-        std::numeric_limits<std::uint64_t>::max();
-    std::uint64_t minimum_vector_instructions =
-        std::numeric_limits<std::uint64_t>::max();
-
-    for (int iteration = 0; iteration < kIterations; ++iteration)
+    for (const BenchmarkCase& benchmark_case : kCases)
     {
-        Timer vector_timer;
-        Timer scalar_timer;
-        scalar_timer.Start();
-        ref::BoxFilter(input, output_reference);
-        scalar_timer.Stop();
-
-        vector_timer.Start();
-        vec::BoxFilter(input, output_vectorized);
-        vector_timer.Stop();
-
-        const std::uint64_t vector_cycles = vector_timer.ElapsedCycles();
-        const std::uint64_t vector_instructions =
-            vector_timer.ElapsedInstructions();
-
-        const std::uint64_t scalar_cycles = scalar_timer.ElapsedCycles();
-        const std::uint64_t scalar_instructions =
-            scalar_timer.ElapsedInstructions();
-        reference_cycles += scalar_cycles;
-        reference_instructions += scalar_instructions;
-        vectorized_cycles += vector_cycles;
-        vectorized_instructions += vector_instructions;
-        if (vector_cycles < minimum_vector_cycles)
+        if (!RunCase(benchmark_case, input, output_reference,
+                     output_vectorized))
         {
-            minimum_vector_cycles = vector_cycles;
-        }
-        if (vector_instructions < minimum_vector_instructions)
-        {
-            minimum_vector_instructions = vector_instructions;
-        }
-
-        printf("  iteration %d scalar: %llu cycles, %llu instructions\n",
-               iteration + 1,
-               (unsigned long long)scalar_cycles,
-               (unsigned long long)scalar_instructions);
-        printf("  iteration %d vector: %llu cycles, %llu instructions\n",
-               iteration + 1,
-               (unsigned long long)vector_cycles,
-               (unsigned long long)vector_instructions);
-
-        if (!CheckCorrectness(output_reference, output_vectorized))
-        {
-            printf("Output is wrong!\n");
             return 1;
         }
     }
-
-    PrintTime("BoxFilter", pixel_count,
-              vectorized_cycles / kIterations,
-              vectorized_instructions / kIterations,
-              reference_cycles / kIterations,
-              reference_instructions / kIterations);
-
-    const std::size_t vlmax = __riscv_vsetvlmax_e16m8();
-    const std::size_t outputs_per_chunk = vlmax - 2;
-    const std::size_t chunks_per_row =
-        (static_cast<std::size_t>(width - 2) + outputs_per_chunk - 1) /
-        outputs_per_chunk;
-    const std::size_t chunk_count =
-        chunks_per_row * static_cast<std::size_t>(height - 2);
-    const std::size_t memory_instruction_floor = 4 * chunk_count;
-    const std::size_t inferred_vlen_bits = vlmax * 16 / 8;
-
-    printf("  vector geometry: VLEN=%llu bits, e16m8 VLMAX=%llu, outputs/chunk=%llu\n",
-           (unsigned long long)inferred_vlen_bits,
-           (unsigned long long)vlmax,
-           (unsigned long long)outputs_per_chunk);
-    printf("  vertical-first memory floor (3 loads + 1 store/chunk): %llu instructions\n",
-           (unsigned long long)memory_instruction_floor);
-    PrintStretchResult(minimum_vector_cycles, minimum_vector_instructions);
 
     printf("Output is correct.\n");
     return 0;

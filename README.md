@@ -164,18 +164,25 @@ See [IMAGEIO.md](IMAGEIO.md) for formats and examples.
 
 ## BoxFilter Task
 
-The `BoxFilter_Task` branch implements a uniform 3x3 filter for 8-bit
-grayscale images. Every non-border result is calculated with integer division:
+The `BoxFilter_Task` branch implements a uniform box filter for `CV_8UC1`
+images with an OpenCV-shaped interface:
 
-```text
-output[y][x] = floor((top[x-1] + top[x] + top[x+1]
-                    + mid[x-1] + mid[x] + mid[x+1]
-                    + bot[x-1] + bot[x] + bot[x+1]) / 9)
+```cpp
+vec::boxFilter(src, dst, ddepth, Size(width, height),
+               Point(anchor_x, anchor_y), normalize, border_type);
 ```
 
-The first and last rows and columns are copied unchanged. Images smaller than
-3x3 are also copied unchanged. Both implementations support input and output
-referring to the same image.
+`ddepth` accepts `-1`, `CV_8U`, or `CV_8UC1`. Kernel dimensions are runtime
+parameters and must be positive and odd; tests cover 1x1 through 11x11 as well
+as a rectangular 5x11 kernel. `Point(-1, -1)` selects the kernel center.
+`BORDER_CONSTANT` uses zero padding, `BORDER_REPLICATE` repeats the nearest
+edge pixel, and the OpenCV-compatible default is `BORDER_REFLECT_101`.
+Normalized results are rounded to nearest; unnormalized results are saturated
+to the 8-bit output range.
+
+The caller preallocates input and output. The scalar and RVV kernels do not use
+dynamic allocation, so input/output aliasing (in-place filtering) is not
+supported.
 
 ### BoxFilter files
 
@@ -185,85 +192,51 @@ referring to the same image.
   [`lib/source/image_BoxFilter.cpp`](lib/source/image_BoxFilter.cpp)
 - Unit tests:
   [`test/unit_test/source/BoxFilter_test.cpp`](test/unit_test/source/BoxFilter_test.cpp)
-- One-iteration benchmark:
+- One-iteration comparative benchmark:
   [`benchmark/source/BoxFilter_benchmark.cpp`](benchmark/source/BoxFilter_benchmark.cpp)
 
 ### Scalar approach
 
-The scalar version visits every interior output pixel, loads its complete 3x3
-neighborhood, accumulates the nine bytes in a wider integer, divides by nine,
-and stores the result. It is the correctness oracle for the RVV output.
+The scalar oracle retains a fixed-work 3x3 centered path so the established
+gem5 comparison does not regress merely because the public API became generic.
+Other kernel shapes directly evaluate the complete neighborhood for each pixel
+with a 64-bit accumulator. Both paths implement the selected border
+extrapolation independently from the RVV kernel.
 
 ### RVV approach
 
-The image bytes are row-major in memory. The middle-row pointer is one image
-width after the top-row pointer, and the bottom-row pointer is one width after
-the middle row.
+The RVV implementation retains a specialized 3x3 path using 16-bit widening,
+vertical reduction, vector slides, and exact multiply-high division. Other
+kernel sizes use 32-bit vector accumulators. When the kernel width fits the
+available vector lanes, each source row is loaded once per chunk, reduced
+vertically, and reused through `vslidedown`; larger valid kernels fall back to
+a direct vector-tap loop. All paths use dynamic `vl` values and handle tails
+without assuming a fixed VLEN. Border bands are computed separately so the
+interior vector loop never performs out-of-bounds loads.
 
-For each output row, the RVV loop processes a dynamic number of pixels:
+### How each benchmark kernel works
 
-1. Load `vl + 2` bytes from each of the top, middle, and bottom rows.
-2. Add the three rows vertically into one 16-bit vector.
-3. Slide that vector by one and two lanes and add the three horizontal
-   positions into the output accumulator.
-4. Divide every 3x3 sum by nine using an exact unsigned multiply-high with
-   `7282`, then narrow to 8 bits.
-5. Store the completed output vector once.
+All benchmark cases apply a normalized box blur: every output pixel is the
+rounded average of the pixels in its square neighborhood. A larger kernel
+therefore produces a stronger blur, but requires more row reductions and
+horizontal additions.
 
-The vector sequence per chunk is:
-
-```text
-3 vector loads
-2 widening vertical additions
-2 vector slides
-2 horizontal additions
-1 unsigned multiply-high
-1 narrowing operation
-1 vector store
-```
-
-Partial sums remain in vector registers until the final store, so the normal
-out-of-place path does not need a temporary image buffer. A snapshot is
-allocated only when the caller explicitly requests in-place filtering.
-
-The implementation uses dynamic vector-length chunking and is not tied to one
-VLEN. Two look-ahead lanes are reserved for the horizontal window. With
-VLEN=128 and the `e16m8` accumulator, for example, VLMAX is 64 lanes and one
-full chunk produces 62 output pixels from 64 loaded pixels. A smaller `vl` is
-used for the tail without reading beyond the row.
-
-The largest 3x3 sum is `9 * 255 = 2295`. Over this complete range, the high
-half of `sum * 7282`, where `7282 = ceil(2^16 / 9)`, is exactly
-`floor(sum / 9)`. This preserves the scalar result without vector division.
-
-### RVV instructions used
-
-The implementation uses RVV C intrinsics from `<riscv_vector.h>`. The compiler
-maps these intrinsics to the following vector instructions:
-
-| Intrinsic / instruction | Purpose in BoxFilter |
+| Kernel | RVV processing |
 | --- | --- |
-| `__riscv_vsetvlmax_e16m8` / `vsetvli` | Finds VLMAX for 16-bit elements with LMUL=8. The loop reserves two of those lanes as horizontal look-ahead pixels. Additional `vsetvli` instructions select the required element width and active `vl` for each operation. |
-| `__riscv_vle8_v_u8m4` / `vle8.v` | Performs three unit-stride byte loads: one each for the top, middle, and bottom rows. Each load reads `vl + 2` pixels. |
-| `__riscv_vwaddu_vv_u16m8` / `vwaddu.vv` | Adds the unsigned 8-bit top and middle pixels and widens each result to 16 bits, preventing overflow. |
-| `__riscv_vwaddu_wv_u16m8` / `vwaddu.wv` | Adds the unsigned 8-bit bottom pixels to the existing 16-bit vertical sums. |
-| `__riscv_vslidedown_vx_u16m8` / `vslidedown.vx` | Produces the vertical sums for horizontal offsets `+2` and `+1`. This reuses the three loaded rows instead of loading all nine kernel positions separately. |
-| `__riscv_vadd_vv_u16m8` / `vadd.vv` | Adds the base, `+1`, and `+2` vertical columns to form every complete 3x3 sum. Two vector additions are required. |
-| `__riscv_vmulhu_vx_u16m8` / `vmulhu.vx` | Multiplies every 16-bit sum by `7282` and keeps the upper 16 bits, implementing exact floor division by nine for sums from 0 through 2295. |
-| `__riscv_vnsrl_wx_u8m4` / `vnsrl.wi` | Narrows the final unsigned 16-bit quotients to 8-bit output pixels. The shift amount is zero because division was already completed by `vmulhu`. |
-| `__riscv_vse8_v_u8m4` / `vse8.v` | Stores the finished output vector once after all nine source pixels have been accumulated. |
+| 3x3 | Uses the dedicated fast path. Three source rows are loaded per vector chunk and widened to 16 bits, then added vertically. Two `vslidedown` operations align the neighboring column sums, and two vector additions produce all overlapping 3x3 sums. Adding 4 followed by multiply-high with 7282 implements exact round-to-nearest division by 9. |
+| 5x5 | Uses the generic 32-bit sliding path. Five loaded rows are reduced vertically, then four slides and additions combine five adjacent column sums before division by 25. |
+| 7x7 | Uses the same generic path with seven vertically reduced rows and six horizontal slides/additions, followed by division by 49. |
+| 9x9 | Uses nine row contributions and eight horizontal slides/additions, followed by division by 81. |
+| 11x11 | Uses eleven row contributions and ten horizontal slides/additions, followed by division by 121. |
 
-The row reduction can be summarized as:
-
-```text
-vertical = widen(top + middle) + bottom
-window   = vertical + slide_down(vertical, 1) + slide_down(vertical, 2)
-output   = narrow(multiply_high_unsigned(window, 7282))
-```
-
-The three source vectors and intermediate sums stay in vector registers during
-the chunk. Only the three input vectors are loaded from memory, and only the
-completed result vector is stored.
+The 3x3 case is specially optimized because it is the common small blur and
+its maximum sum fits safely in 16 bits. Most importantly, border handling is
+not performed inside its hot RVV loop. The narrow outer border is calculated
+separately using the selected border mode, while the vector loop processes only
+interior pixels whose complete 3x3 neighborhood is already in bounds. Removing
+per-lane border checks and coordinate correction from the hot loop makes a
+large performance difference. The border is not omitted from the output; it is
+simply separated from the optimized interior calculation.
 
 ### Run the BoxFilter tests
 
@@ -271,24 +244,53 @@ completed result vector is stored.
 # Fast functional validation
 cmake --build build --target run_BoxFilter_test_qemu
 
-# Cycle-accurate validation
-cmake --build build --target run_BoxFilter_test_gem5
+# Full QEMU suite
+cmake --build build --target run_unit_tests_qemu
 ```
 
-The tests compare scalar and RVV output across different image sizes, vector
-tails, maximum pixel values, borders, and in-place operation.
+The tests compare scalar and RVV output across both border modes, odd kernel
+sizes, explicit/default anchors, vector tails, rounding, and saturation.
 
 ### Benchmark scalar versus RVV
 
-The benchmark is configured for exactly one iteration. It runs the scalar
-implementation once and the RVV implementation once, checks that their output
-matches, and reports cycles and retired instructions for both.
+The benchmark runs every square odd kernel from 3x3 through 11x11 (3, 5, 7,
+9, and 11) for one iteration.
+Allocation and initialization remain outside timed regions. Each iteration
+checks scalar/RVV equality and the report includes average cycles, retired
+instructions, cycles per pixel, pixels per cycle, and speedup. The 3x3 gem5
+report also prints deltas from the established 931,854-cycle/288,903-instruction
+vector baseline.
+
+### Measured gem5 results
+
+The latest local gem5 run used the 640x960 image and one iteration per kernel.
+It completed the 3x3, 5x5, and 7x7 cases before the run stopped at the start of
+9x9. These are the results preserved in
+`build/benchmark/BoxFilter_benchmark_gem5.log`:
+
+| Kernel and border | Scalar cycles | Scalar instructions | RVV cycles | RVV instructions | Speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 3x3 constant | 2,602,478 | 16,576,463 | 962,671 | 363,286 | 2.703x |
+| 5x5 replicate | 46,742,251 | 230,504,743 | 5,990,412 | 4,057,176 | 7.803x |
+| 7x7 replicate | 78,751,157 | 410,044,903 | 9,021,497 | 8,505,092 | 8.729x |
+| 9x9 replicate | Not completed | Not completed | Not completed | Not completed | -- |
+| 11x11 replicate | Not reached | Not reached | Not reached | Not reached | -- |
+
+The 3x3 RVV result is 30,817 cycles and 74,383 instructions above the earlier
+931,854-cycle and 288,903-instruction baseline. Results depend on the compiler,
+simulator configuration, image, and vector length, so this table should be
+updated whenever the benchmark is rerun under different conditions.
 
 ```bash
 # Fast functional benchmark
 cmake --build build --target run_BoxFilter_benchmark_qemu
 
-# Cycle-accurate performance benchmark
+# Run this yourself for cycle-accurate gem5 performance. Disable the fork's
+# default 40-million-instruction stop and its 20-million-instruction stats reset
+# so every kernel is reported in one uninterrupted run.
+cmake -S . -B build \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64_xs_toolchain.cmake \
+  -DGEM5_EXTRA_ARGS="--disable-difftest --maxinsts=0 --warmup-insts-no-switch=0"
 cmake --build build --target run_BoxFilter_benchmark_gem5
 ```
 
@@ -300,32 +302,9 @@ build/benchmark/BoxFilter_benchmark_gem5.log
 build/benchmark/BoxFilter_benchmark_gem5-m5out/
 ```
 
-The reported 60,000-cycle and 20,000-instruction values are non-gating stretch
-targets. They do not stop the run or determine correctness.
-
-### Measured BoxFilter results
-
-The latest one-iteration gem5 result in the local
-`build/benchmark/BoxFilter_benchmark_gem5.log` uses the 640x960 image,
-VLEN=128, `e16m8` VLMAX=64, and 62 output pixels per full vector chunk:
-
-| Implementation | Cycles | Retired instructions | Pixels/cycle |
-| --- | ---: | ---: | ---: |
-| Scalar | 6,783,526 | 15,297,888 | 0.090572 |
-| RVV | 931,854 | 288,903 | 0.659331 |
-
-For this run, RVV is **7.28x faster by cycle count**, uses **52.95x fewer
-retired instructions**, reduces cycles by **86.3%**, and reduces retired
-instructions by **98.1%**. The scalar and RVV images matched exactly, and the
-benchmark ended with `Output is correct.`
-
-The RVV result did not reach the non-gating stretch targets: it was 871,854
-cycles above 60,000 and 268,903 instructions above 20,000. With this geometry,
-the 3-load plus 1-store design alone has a calculated floor of 42,152 vector
-memory instructions across all chunks, before loop control, arithmetic,
-border handling, and benchmark overhead. Results depend on the image,
-compiler, vector length, and gem5 configuration, so rerun the command above
-after implementation or simulator changes.
+QEMU is used here only for functional validation and confirming that the
+benchmark completes. Its user-mode CSR values are not reliable performance
+measurements; use gem5 for cycle and retired-instruction comparisons.
 
 ### Run the BoxFilter visualization
 

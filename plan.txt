@@ -1,20 +1,26 @@
-BoxFilter 3x3 implementation checklist
-======================================
+Generic BoxFilter implementation checklist
+==========================================
 
 [x] Copy and validate the repository-scoped riscv-cv-algorithm skill.
-[x] Add matching ref::BoxFilter and vec::BoxFilter APIs for grayscale uint8_t images.
-[x] Preserve image size, copy the one-pixel border, use stride-1 overlapping windows,
-    floor(sum / 9), and support in-place calls through an input snapshot.
-[x] Implement the scalar reference with direct nested loops and native integer division.
-[x] Implement the RVV kernel with three interleaved row loads, overlapping horizontal
-    triplets formed by slides of one and two lanes, lane-for-lane 16-bit accumulation,
-    exact shift/add/subtract division by nine,
-    dynamic vsetvl tail handling, narrowing, and direct stores.
-[x] Add deterministic correctness tests for small images, borders, tails, all division
-    sums 0..2295, maximum values, and in-place operation.
-[ ] Benchmark the complete 640x960 image0 using three timed runs. Report averages,
-    minimum-observed cycles/instructions, a structural instruction lower bound, and
-    the non-gating 50,000-cycle / 15,000-instruction stretch target comparison.
+[x] Add matching OpenCV-shaped ref::BoxFilter and vec::BoxFilter APIs for CV_8UC1.
+[x] Require caller-preallocated, non-aliasing images and perform no dynamic allocation
+    inside either kernel.
+[x] Support runtime positive odd kernels, default/explicit anchors, normalization,
+    BORDER_CONSTANT zero padding, BORDER_REPLICATE, and the OpenCV-compatible
+    BORDER_REFLECT_101 default.
+[x] Implement a scalar mathematical oracle with rounded normalized conversion and
+    saturated unnormalized CV_8U conversion.
+[x] Restore a fixed-work centered 3x3 scalar path so the generic API does not exceed
+    the default gem5 instruction budget before reaching the vector measurement.
+[x] Retain a specialized 3x3 RVV path and add generic vertical-first/slide and direct
+    vector paths with dynamic vsetvl tail handling.
+[x] Specialize 3x3 constant/replicate border bands and record the established gem5
+    vector baseline (931854 cycles, 288903 instructions) in the benchmark report.
+[x] Add deterministic correctness tests for tiny images, borders, tails, kernels from
+    1x1 through 11x11, rectangular kernels, anchors, rounding, and saturation.
+[x] Benchmark the complete 640x960 image0 for every square odd kernel from 3x3
+    through 11x11 using one timed run, scalar/RVV checks, cycles, instructions,
+    cycles/pixel, pixels/cycle, and speedup.
 [x] Add BoxFilter_example using image0.pgm on QEMU and image0.hpp on gem5, producing
     images/BoxFilter_output.pgm on QEMU.
 [x] Inspect generated RVV assembly and verify the intended load/slide/add path and the
@@ -23,10 +29,5 @@ BoxFilter 3x3 implementation checklist
     Scalar, RVV, and Performance tabs, actual image0 PGM rendering, interactive pixel
     inspection, guided steppers, dark/sepia themes, responsive layout, and accessible
     keyboard controls.
-[ ] Run focused and aggregate QEMU tests, QEMU benchmark/example, focused gem5 tests,
-    gem5 benchmark, PGM verification, static-site checks, and localhost smoke testing.
-    All listed checks except the intentionally stopped full gem5 benchmark are complete.
-
-The performance limits are stretch targets rather than correctness gates for the full
-614,400-pixel image. "Minimum" means the best observed value in the three controlled
-gem5 iterations, not a mathematical global optimum.
+[x] Run focused and aggregate QEMU tests and the QEMU benchmark.
+[ ] Run gem5 benchmark (left to the user by request).
