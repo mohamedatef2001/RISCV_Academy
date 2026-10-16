@@ -240,12 +240,41 @@ simply separated from the optimized interior calculation.
 
 ### Run the BoxFilter tests
 
+The unit test uses deliberately small and irregular images because its purpose
+is exact correctness checking, not performance measurement. Small 3x3 cases
+make border and rounding results easy to calculate by hand, while 1-pixel-wide
+images and widths around a vector chunk boundary (31, 63, 64, and 65) expose
+edge, vector-tail, and out-of-bounds bugs. Every output pixel from the RVV
+implementation is compared with the independent scalar reference. Additional
+cases check constant, replicate, and default borders; normalized rounding;
+8-bit saturation; different kernel shapes; and centered and explicit anchors.
+
+The three BoxFilter programs therefore have different roles:
+
+- `BoxFilter_test.cpp` is a small, fast correctness and regression test. Run it
+  after changing the filter, compiler flags, or toolchain.
+- `BoxFilter_example.cpp` demonstrates the filter on an actual image and writes
+  an output image where hosted file I/O is available.
+- `BoxFilter_benchmark.cpp` processes a large image to compare scalar and RVV
+  performance. Use its gem5 run for meaningful cycle and instruction counts.
+
+The same tests can run under QEMU and gem5. QEMU provides fast functional
+feedback, while gem5 validates the bare-metal build on the simulated XiangShan
+CPU model. The exhaustive test of every possible 3x3 sum is omitted from the
+gem5 bare-metal build; the remaining BoxFilter tests run in both environments.
+
 ```bash
 # Fast functional validation
 cmake --build build --target run_BoxFilter_test_qemu
 
+# Bare-metal validation on the gem5 CPU model
+cmake --build build --target run_BoxFilter_test_gem5
+
 # Full QEMU suite
 cmake --build build --target run_unit_tests_qemu
+
+# Full gem5 suite
+cmake --build build --target run_unit_tests_gem5
 ```
 
 The tests compare scalar and RVV output across both border modes, odd kernel
