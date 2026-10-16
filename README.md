@@ -268,13 +268,13 @@ It completed the 3x3, 5x5, and 7x7 cases before the run stopped at the start of
 9x9. These are the results preserved in
 `build/benchmark/BoxFilter_benchmark_gem5.log`:
 
-| Kernel and border | Scalar cycles | Scalar instructions | RVV cycles | RVV instructions | Speedup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 3x3 constant | 2,602,478 | 16,576,463 | 962,671 | 363,286 | 2.703x |
-| 5x5 replicate | 46,742,251 | 230,504,743 | 5,990,412 | 4,057,176 | 7.803x |
-| 7x7 replicate | 78,751,157 | 410,044,903 | 9,021,497 | 8,505,092 | 8.729x |
-| 9x9 replicate | Not completed | Not completed | Not completed | Not completed | -- |
-| 11x11 replicate | Not reached | Not reached | Not reached | Not reached | -- |
+| Kernel and border | Scalar cycles | Scalar cycles/pixel | Scalar instructions | RVV cycles | RVV cycles/pixel | RVV instructions | Speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3x3 constant | 2,602,478 | 4.235804 | 16,576,463 | 962,671 | 1.566847 | 363,286 | 2.703x |
+| 5x5 replicate | 46,742,251 | 76.077881 | 230,504,743 | 5,990,412 | 9.750019 | 4,057,176 | 7.803x |
+| 7x7 replicate | 78,751,157 | 128.175720 | 410,044,903 | 9,021,497 | 14.683426 | 8,505,092 | 8.729x |
+| 9x9 replicate | Not completed | -- | Not completed | Not completed | -- | Not completed | -- |
+| 11x11 replicate | Not reached | -- | Not reached | Not reached | -- | Not reached | -- |
 
 The 3x3 RVV result is 30,817 cycles and 74,383 instructions above the earlier
 931,854-cycle and 288,903-instruction baseline. Results depend on the compiler,
