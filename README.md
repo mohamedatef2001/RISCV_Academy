@@ -257,9 +257,7 @@ The benchmark runs every square odd kernel from 3x3 through 11x11 (3, 5, 7,
 9, and 11) for one iteration.
 Allocation and initialization remain outside timed regions. Each iteration
 checks scalar/RVV equality and the report includes average cycles, retired
-instructions, cycles per pixel, pixels per cycle, and speedup. The 3x3 gem5
-report also prints deltas from the established 931,854-cycle/288,903-instruction
-vector baseline.
+instructions, cycles per pixel, pixels per cycle, and speedup.
 
 ### Measured gem5 results
 
@@ -274,10 +272,9 @@ It completed the 3x3, 5x5, and 7x7 cases before the run stopped at the start of
 | 5x5 replicate | 46,742,251 | 76.077881 | 230,504,743 | 5,990,412 | 9.750019 | 4,057,176 | 7.803x |
 | 7x7 replicate | 78,751,157 | 128.175720 | 410,044,903 | 9,021,497 | 14.683426 | 8,505,092 | 8.729x |
 
-The 3x3 RVV result is 30,817 cycles and 74,383 instructions above the earlier
-931,854-cycle and 288,903-instruction baseline. Results depend on the compiler,
-simulator configuration, image, and vector length, so this table should be
-updated whenever the benchmark is rerun under different conditions.
+Results depend on the compiler, simulator configuration, image, and vector
+length, so this table should be updated whenever the benchmark is rerun under
+different conditions.
 
 ```bash
 # Fast functional benchmark
