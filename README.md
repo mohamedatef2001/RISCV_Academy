@@ -346,14 +346,17 @@ cmake --build build --target run_NMS_image_example_gem5
 
 The current XS-GEM5 run uses `image1` dimensions (640x960), three classes, six
 iterations, and 16, 32, 64, or 128 candidates per class. All four paths produced
-identical selected indices and the run ended with `Output is correct.`
+identical selected indices and the run ended with `Output is correct.` Each cell
+below reports **average cycles / cycles per candidate**. The per-candidate value
+divides the average cycles by the total candidates in one image
+(`3 classes * candidates/class`); the six iterations are already averaged.
 
-| Candidates/class | Scalar odd-even | Scalar bitonic | RVV odd-even | RVV bitonic |
-| ---: | ---: | ---: | ---: | ---: |
-| 16 | 2,827 cycles | 3,804 cycles | 8,398 cycles | 7,816 cycles |
-| 32 | 8,641 cycles | 9,089 cycles | 19,629 cycles | 15,300 cycles |
-| 64 | 32,422 cycles | 29,463 cycles | 73,092 cycles | 49,198 cycles |
-| 128 | 139,433 cycles | 103,157 cycles | 278,224 cycles | 161,977 cycles |
+| Candidates/class | Total candidates | Scalar odd-even | Scalar bitonic | RVV odd-even | RVV bitonic |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 16 | 48 | 2,827 / 58.89 | 3,804 / 79.25 | 8,398 / 174.95 | 7,816 / 162.83 |
+| 32 | 96 | 8,641 / 90.01 | 9,089 / 94.67 | 19,629 / 204.46 | 15,300 / 159.37 |
+| 64 | 192 | 32,422 / 168.86 | 29,463 / 153.45 | 73,092 / 380.68 | 49,198 / 256.23 |
+| 128 | 384 | 139,433 / 363.10 | 103,157 / 268.63 | 278,224 / 724.54 | 161,977 / 421.81 |
 
 The results show:
 
