@@ -1,0 +1,4 @@
+interface:
+  display_name: "RISC-V CV Algorithm"
+  short_description: "Add CV scalar, RVV, tests, and benchmarks"
+  default_prompt: "Use $riscv-cv-algorithm to add a complete computer-vision algorithm with a scalar reference, RVV implementation, correctness tests, and an algorithm-appropriate comparative benchmark."
