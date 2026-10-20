@@ -311,6 +311,29 @@ equal scores retain their original order. Allocate each workspace array using
 `NMSWorkspaceCapacity(spatial_dim, algorithm)`; bitonic sorting may require the
 next power of two.
 
+### Image NMS example
+
+`NMS_image_example` uses only `images/image1.hpp`. Five overlapping detector
+proposals cover the large central rock and one low-confidence proposal covers
+the horizon. NMS does not find the rock from image pixels; it filters the
+detector's boxes and retains rock box 0 with score `0.98`. The example confirms
+that scalar odd-even, scalar bitonic, RVV odd-even, and RVV bitonic agree.
+
+```bash
+cmake --build build --target run_NMS_image_example_qemu
+```
+
+The QEMU run writes the proposals and final selection to:
+
+- `build/example/image1_nms_candidates.pgm`
+- `build/example/image1_nms_selected.pgm`
+
+The corresponding gem5 command is:
+
+```bash
+cmake --build build --target run_NMS_image_example_gem5
+```
+
 ### Recorded gem5 results
 
 The current XS-GEM5 run uses `image1` dimensions (640x960), three classes, six
@@ -382,27 +405,4 @@ validate its fixtures directly against ONNX Runtime:
 python3 -m venv .venv-nms
 .venv-nms/bin/pip install -r test/GoldenReference/requirements.txt
 .venv-nms/bin/python -m pytest test/GoldenReference/test_nms_golden.py -q
-```
-
-### Image NMS examples
-
-`NMS_image_example` uses only `images/image1.hpp`. Five overlapping detector
-proposals cover the large central rock and one low-confidence proposal covers
-the horizon. NMS does not find the rock from image pixels; it filters the
-detector's boxes and retains rock box 0 with score `0.98`. The example confirms
-that scalar odd-even, scalar bitonic, RVV odd-even, and RVV bitonic agree.
-
-```bash
-cmake --build build --target run_NMS_image_example_qemu
-```
-
-The QEMU run writes the proposals and final selection to:
-
-- `build/example/image1_nms_candidates.pgm`
-- `build/example/image1_nms_selected.pgm`
-
-The corresponding gem5 command is:
-
-```bash
-cmake --build build --target run_NMS_image_example_gem5
 ```
