@@ -319,6 +319,14 @@ the horizon. NMS does not find the rock from image pixels; it filters the
 detector's boxes and retains rock box 0 with score `0.98`. The example confirms
 that scalar odd-even, scalar bitonic, RVV odd-even, and RVV bitonic agree.
 
+These are multiple candidate boxes (detector proposals), not multiple kernels.
+The NMS kernel receives the boxes and their scores, removes the lower-scoring
+overlapping boxes, and produces the final selection shown on the right.
+
+| Before NMS: multiple candidate boxes | After NMS: selected result |
+| --- | --- |
+| ![Multiple overlapping candidate boxes around the large central rock](docs/images/image1_nms_candidates.png) | ![The highest-scoring box retained around the large central rock](docs/images/image1_nms_selected.png) |
+
 ```bash
 cmake --build build --target run_NMS_image_example_qemu
 ```
