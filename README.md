@@ -350,12 +350,12 @@ identical selected indices and the run ended with `Output is correct.` Each cell
 below is averaged over the six iterations. Cycles per candidate divides the
 average cycles by `3 classes * candidates per class`.
 
-| Candidates/class | Scalar odd-even cycles | Scalar odd-even cycles/candidate | Scalar bitonic cycles | Scalar bitonic cycles/candidate | RVV odd-even cycles | RVV odd-even cycles/candidate | RVV bitonic cycles | RVV bitonic cycles/candidate |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 16 | 2,827 | 58.89 | 3,804 | 79.25 | 8,398 | 174.95 | 7,816 | 162.83 |
-| 32 | 8,641 | 90.01 | 9,089 | 94.67 | 19,629 | 204.46 | 15,300 | 159.37 |
-| 64 | 32,422 | 168.86 | 29,463 | 153.45 | 73,092 | 380.68 | 49,198 | 256.23 |
-| 128 | 139,433 | 363.10 | 103,157 | 268.63 | 278,224 | 724.54 | 161,977 | 421.81 |
+| Candidates/class | Scalar odd-even | Scalar bitonic | RVV odd-even | RVV bitonic |
+| ---: | ---: | ---: | ---: | ---: |
+| 16 | 2,827 cycles<br>58.89 cycles/candidate | 3,804 cycles<br>79.25 cycles/candidate | 8,398 cycles<br>174.95 cycles/candidate | 7,816 cycles<br>162.83 cycles/candidate |
+| 32 | 8,641 cycles<br>90.01 cycles/candidate | 9,089 cycles<br>94.67 cycles/candidate | 19,629 cycles<br>204.46 cycles/candidate | 15,300 cycles<br>159.37 cycles/candidate |
+| 64 | 32,422 cycles<br>168.86 cycles/candidate | 29,463 cycles<br>153.45 cycles/candidate | 73,092 cycles<br>380.68 cycles/candidate | 49,198 cycles<br>256.23 cycles/candidate |
+| 128 | 139,433 cycles<br>363.10 cycles/candidate | 103,157 cycles<br>268.63 cycles/candidate | 278,224 cycles<br>724.54 cycles/candidate | 161,977 cycles<br>421.81 cycles/candidate |
 
 The results show:
 
