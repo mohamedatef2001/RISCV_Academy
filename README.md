@@ -152,6 +152,120 @@ build files. Pass them with `-D<VAR>=value` at configure time.
   target (e.g. `unit_tests_qemu`) and creates `run_<target>` plus a ctest entry
   that runs the ELF under `qemu-riscv64`; ctest uses the guest exit code.
 
+## Median filter
+
+The median filter replaces each pixel with the middle-ranked value in its local
+neighborhood. It removes isolated salt-and-pepper noise without averaging those
+extreme values into nearby pixels. This implementation supports 8-bit grayscale
+images and the odd square kernels `3x3`, `5x5`, `7x7`, `9x9`, and `11x11`.
+Output dimensions match the input, and samples outside the image use replicated
+edge pixels.
+
+The scalar implementation is the correctness oracle: it gathers every
+neighborhood, insertion-sorts it, and selects `kernel_size * kernel_size / 2`.
+The RVV implementation dispatches to a strategy suited to each kernel size:
+
+- `3x3` loads nine neighboring vectors and runs a fixed 20-comparison median
+  selection network derived by pruning the 9-input network from
+  [Bert Dobbelaere's catalog](https://bertdobbelaere.github.io/sorting_networks.html).
+- `5x5` and `7x7` use eight exact radix-selection passes. Each vector lane is an
+  independent output pixel; every pass counts neighborhood values below a trial
+  prefix and decides one median bit.
+- `9x9` and `11x11` maintain sliding per-column histograms. RVV adds and removes
+  256 fine bins plus 16 coarse bins in parallel, while the two-level lookup
+  identifies the exact median with at most 32 scalar bin checks.
+
+All RVV row loops use dynamic `vsetvl`: a chunk uses the hardware's available
+lanes, and the final chunk automatically shrinks to the remaining pixels.
+`9x9` and `11x11` require caller-owned `uint16_t` histogram storage sized by
+`MedianFilterWorkspaceCapacity`; allocation remains outside the kernel and
+outside benchmark timing.
+
+```mermaid
+flowchart TD
+    A[Load image1.hpp] --> B[Inject deterministic 5% salt-and-pepper noise]
+    B --> C{Implementation}
+
+    C -->|Scalar oracle| D[Gather replicated neighborhood]
+    D --> E[Insertion sort]
+    E --> F[Select middle-ranked value]
+
+    C -->|RVV| G{Kernel size}
+    G -->|3x3| H[Register-resident compare/exchange network]
+    G -->|5x5 or 7x7| I[Vector radix selection across output pixels]
+    G -->|9x9 or 11x11| J[Sliding fine and coarse histograms]
+
+    H --> K[Write filtered image]
+    I --> K
+    J --> K
+    F --> L[Bit-exact scalar/RVV comparison]
+    K --> L
+    L --> M[QEMU tests and all-kernel benchmark]
+    M --> N[Generate input/output images]
+    M --> O[User runs 3x3 benchmark on gem5]
+```
+
+### Correctness and benchmark commands
+
+```bash
+# Focused tests covering all five kernels, borders, tiny images, and RVV tails
+cmake --build build --target run_MedianFilter_test_qemu
+
+# Aggregate repository test suite
+cmake --build build --target run_unit_tests_qemu
+
+# Scalar-versus-RVV QEMU comparison for all five kernels
+cmake --build build --target run_MedianFilter_benchmark_qemu
+
+# Cycle-accurate 3x3 comparison (run by the user)
+cmake --build build --target run_MedianFilter_benchmark_gem5
+
+# Regenerate the PNG-only noisy input and five filtered outputs
+cmake --build build --target run_MedianFilter_image_example_qemu
+python3 scripts/pgm_to_png.py --output-directory images --remove-source \
+    /tmp/median_filter_*.pgm
+```
+
+QEMU validates RVV behavior and benchmark completion, but its CSR timing is not
+cycle-accurate, and these figures can vary between runs. They must not be used
+to claim performance on hardware. Use the gem5 command for the authoritative
+`3x3` cycle and retired-instruction comparison.
+
+### Noisy input and filtered outputs
+
+The example copies the 640x960 grayscale pixels compiled into `image1.hpp`, then
+changes approximately 5% of them to black or white using a fixed-seed generator.
+The original `image1.hpp` data remains unchanged. Intermediate PGM files are
+created under `/tmp`, converted, and removed; the repository retains PNG images
+only.
+
+| Noisy input | `3x3` output |
+| --- | --- |
+| <img src="images/median_filter_input_noisy.png" alt="image1 with deterministic salt-and-pepper noise" width="320"> | <img src="images/median_filter_output_03x03.png" alt="3x3 median-filter output" width="320"> |
+
+| `5x5` output | `7x7` output |
+| --- | --- |
+| <img src="images/median_filter_output_05x05.png" alt="5x5 median-filter output" width="320"> | <img src="images/median_filter_output_07x07.png" alt="7x7 median-filter output" width="320"> |
+
+| `9x9` output | `11x11` output |
+| --- | --- |
+| <img src="images/median_filter_output_09x09.png" alt="9x9 median-filter output" width="320"> | <img src="images/median_filter_output_11x11.png" alt="11x11 median-filter output" width="320"> |
+
+### gem5 benchmark result
+
+The cycle-accurate `3x3` benchmark processed 12,288 pixels. The scalar and RVV
+outputs matched exactly.
+
+| Implementation | Cycles | Retired instructions | Pixels/cycle |
+| --- | ---: | ---: | ---: |
+| Scalar | 1,006,355 | 4,859,844 | 0.012210 |
+| RVV | 50,069 | 96,170 | 0.245421 |
+
+| Result | Value |
+| --- | ---: |
+| Scalar/RVV speedup | **20.099x** |
+| Correctness | Exact match |
+
 ## Image I/O
 
 - **qemu-user** — `Image::Read("in.pgm")` and `Image::Write("out.pgm")` use hosted

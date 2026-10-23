@@ -5,6 +5,8 @@
 #include "image.hpp"
 #include "riscv_port.hpp"
 
+#include <cstdint>
+
 // Compare two images pixel-by-pixel, printing the first few mismatches.
 template <typename T>
 bool CheckCorrectness(const Image<T>& expected, const Image<T>& actual)
@@ -74,3 +76,34 @@ private:
     int min_;
     int span_;
 };
+
+// Deterministic salt-and-pepper noise shared by the example and benchmark.
+// The LCG constants are the Numerical Recipes 32-bit parameters. Passing a
+// percentage of 5 changes approximately one pixel in twenty, split evenly
+// between black and white impulses.
+inline void AddSaltAndPepperNoise(Image<std::uint8_t>& image,
+                                  const unsigned int percentage,
+                                  std::uint32_t seed = 0x4d454449U)
+{
+    constexpr std::uint32_t kLcgMultiplier = 1664525U;
+    constexpr std::uint32_t kLcgIncrement = 1013904223U;
+    constexpr unsigned int kPercentScale = 100U;
+    constexpr std::uint8_t kPepperValue = 0U;
+    constexpr std::uint8_t kSaltValue = 255U;
+
+    assert(percentage <= kPercentScale);
+    std::uint32_t state = seed;
+    for (int y = 0; y < image.Height(); ++y)
+    {
+        for (int x = 0; x < image.Width(); ++x)
+        {
+            state = state * kLcgMultiplier + kLcgIncrement;
+            if (state % kPercentScale < percentage)
+            {
+                state = state * kLcgMultiplier + kLcgIncrement;
+                image.SetPixel(x, y,
+                    (state & 1U) == 0U ? kPepperValue : kSaltValue);
+            }
+        }
+    }
+}

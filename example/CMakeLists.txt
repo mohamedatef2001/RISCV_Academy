@@ -15,6 +15,7 @@ foreach(EXAMPLE_SOURCE ${EXAMPLE_SOURCES})
     riscv_add_gem5_run(${EXAMPLE_NAME}_gem5)
 
     riscv_add_linux_executable(${EXAMPLE_SOURCE})
+    target_include_directories(${EXAMPLE_NAME}_qemu PRIVATE ${CMAKE_SOURCE_DIR}/images)
     target_link_libraries(${EXAMPLE_NAME}_qemu PRIVATE ${CMAKE_PROJECT_NAME}_qemu reference_qemu)
 
     riscv_add_qemu_run(${EXAMPLE_NAME}_qemu)

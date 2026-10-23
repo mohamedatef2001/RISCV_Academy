@@ -13,7 +13,8 @@ foreach(BENCHMARK_SOURCE ${BENCHMARK_SOURCES})
     target_link_libraries(${BENCHMARK_NAME}_gem5 PRIVATE ${CMAKE_PROJECT_NAME}_gem5 reference_gem5 riscv_baremetal_runtime)
 
     target_include_directories(${BENCHMARK_NAME}_gem5 PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/include)
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_SOURCE_DIR}/images)
 
     # Benchmarks are not gtest programs; they print "Output is correct." on success and "Output is wrong!" on failure.
     set_target_properties(${BENCHMARK_NAME}_gem5 PROPERTIES
@@ -25,7 +26,8 @@ foreach(BENCHMARK_SOURCE ${BENCHMARK_SOURCES})
     target_link_libraries(${BENCHMARK_NAME}_qemu PRIVATE ${CMAKE_PROJECT_NAME}_qemu reference_qemu)
 
     target_include_directories(${BENCHMARK_NAME}_qemu PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/include)
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_SOURCE_DIR}/images)
 
     riscv_add_qemu_run(${BENCHMARK_NAME}_qemu)
 endforeach()
