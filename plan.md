@@ -106,7 +106,6 @@ flowchart TD
 - Copy the complete `skill-package/riscv-cv-algorithm` package unchanged from
   `NMS_Task`, validate it with the skill-creator `quick_validate.py`, and follow
   its scalar/RVV/test/benchmark workflow.
-- Preserve the existing untracked `.venv-nms` directory and all unrelated work.
 
 ## Testing and benchmarking
 
