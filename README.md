@@ -202,7 +202,7 @@ flowchart TD
     K --> L
     L --> M[QEMU tests and all-kernel benchmark]
     M --> N[Generate input/output images]
-    M --> O[User runs 3x3 benchmark on gem5]
+    M --> O[Run all five scalar/RVV benchmarks on gem5]
 ```
 
 ### Correctness and benchmark commands
@@ -217,7 +217,7 @@ cmake --build build --target run_unit_tests_qemu
 # Scalar-versus-RVV QEMU comparison for all five kernels
 cmake --build build --target run_MedianFilter_benchmark_qemu
 
-# Cycle-accurate 3x3 comparison (run by the user)
+# Cycle-accurate scalar-versus-RVV comparison for all five kernels
 cmake --build build --target run_MedianFilter_benchmark_gem5
 
 # Regenerate the PNG-only noisy input and five filtered outputs
@@ -229,7 +229,7 @@ python3 scripts/pgm_to_png.py --output-directory images --remove-source \
 QEMU validates RVV behavior and benchmark completion, but its CSR timing is not
 cycle-accurate, and these figures can vary between runs. They must not be used
 to claim performance on hardware. Use the gem5 command for the authoritative
-`3x3` cycle and retired-instruction comparison.
+cycle and retired-instruction comparisons for all five kernels.
 
 ### Noisy input and filtered outputs
 
@@ -253,8 +253,9 @@ only.
 
 ### gem5 benchmark result
 
-The cycle-accurate `3x3` benchmark processed 12,288 pixels. The scalar and RVV
-outputs matched exactly.
+The initial cycle-accurate `3x3` benchmark processed 12,288 pixels. The scalar
+and RVV outputs matched exactly. Run the updated all-kernel benchmark command
+above to collect the `5x5` through `11x11` results.
 
 | Implementation | Cycles | Retired instructions | Pixels/cycle |
 | --- | ---: | ---: | ---: |

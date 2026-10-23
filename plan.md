@@ -131,10 +131,10 @@ flowchart TD
   - Report cycles, retired instructions, cycles/pixel, pixels/cycle, and
     `scalar_cycles / vector_cycles`.
 - Use QEMU for functional tests and benchmark completion only. Run all five
-  kernel sizes under QEMU. Build the gem5 benchmark but leave its execution to
-  the user, who will measure the `3x3` case in the terminal.
-- Treat a gem5 speedup greater than `1.00x` for `3x3` as the cycle-accurate
-  performance acceptance gate. If it misses the gate, use the user's result to
+  kernel sizes under QEMU. Build the gem5 benchmark for the user to execute in
+  the terminal, measuring all five scalar and RVV kernel sizes.
+- Treat gem5 speedup greater than `1.00x` as the cycle-accurate performance
+  acceptance gate. If a kernel misses the gate, use the user's result to
   inspect generated RVV assembly and gem5 statistics, then tune the network,
   LMUL, or memory access before rerunning.
 - Perform final verification in this order:
@@ -147,8 +147,8 @@ flowchart TD
      flowchart and results in `README.md` only after the tests pass.
   6. Inspect RVV assembly for the intended vector min/max operations, indexed
      histogram operations, and safe tail handling.
-  7. Provide `run_MedianFilter_benchmark_gem5` for the user to run with the
-     `3x3` benchmark case.
+  7. Provide `run_MedianFilter_benchmark_gem5` for the user to run with all five
+     benchmark cases.
 
 ## Assumptions and boundaries
 

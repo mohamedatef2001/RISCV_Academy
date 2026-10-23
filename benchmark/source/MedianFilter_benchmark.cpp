@@ -114,16 +114,12 @@ int main()
         workspace_data, workspace_capacity};
 
     bool correct = true;
-#ifdef RISCV_BAREMETAL
-    // The user requested the cycle-accurate gem5 run for 3x3 only.
-    correct = RunCase(3, input, scalar_output, vector_output, workspace);
-#else
     for (const int kernel_size : kKernelSizes)
     {
-        correct = correct && RunCase(
+        const bool case_correct = RunCase(
             kernel_size, input, scalar_output, vector_output, workspace);
+        correct = correct && case_correct;
     }
-#endif
 
     delete[] workspace_data;
     if (correct)
